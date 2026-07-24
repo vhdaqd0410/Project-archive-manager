@@ -11,22 +11,8 @@ let projects = [];
 let settings = { keyword: '项目归档资料', templates: [] };
 
 // ---------- 任务管理器 ----------
-const tasks = {}; // { taskId: { aborted: false } }
-const sseClients = {}; // { taskId: [res, res, ...] }
-
-function createTask() {
-  const taskId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-  tasks[taskId] = { aborted: false };
-  sseClients[taskId] = [];
-  setTimeout(() => { delete tasks[taskId]; delete sseClients[taskId]; }, 600000); // 10分钟自动清理
-  return taskId;
-}
-
-function sendSSE(taskId, data) {
-  (sseClients[taskId] || []).forEach(client => {
-    client.write(`data: ${JSON.stringify(data)}\n\n`);
-  });
-}
+// ---------- 任务管理器（轮询模式） ----------
+const tasks = {}; // { taskId: { aborted, paused, current, total, file, done, ok, fail } }
 
 // 初始化：迁移旧数据并加载
 projectService.migrateOldData();
@@ -164,12 +150,12 @@ router.post('/projects/:index/copy', async (req, res) => {
     } catch (err) {
       results.push({ name, success: false, error: err.message });
     }
-    if (taskId) sendSSE(taskId, { type: 'progress', current: i + 1, total, file: name });
+    if (taskId) tasks[taskId] = { ...(tasks[taskId]||{}), current: i + 1, total, file: name, done: false };
   }
 
   const ok = results.filter(r => r.success).length;
   const fail = results.filter(r => !r.success).length;
-  if (taskId) sendSSE(taskId, { type: 'complete', ok, fail, total, aborted: tasks[taskId] && tasks[taskId].aborted });
+  if (taskId) tasks[taskId] = { ...(tasks[taskId]||{}), done: true, ok, fail, total };
   res.json({ success: true, ok, fail, results, taskId });
 });
 
@@ -367,31 +353,16 @@ function countFiles(dir) {
   return c;
 }
 
-// ==================== 任务进度 SSE ====================
-router.get('/task-progress/:taskId', (req, res) => {
+// ==================== 任务状态轮询 ====================
+router.get('/task-status/:taskId', (req, res) => {
   const { taskId } = req.params;
-  // 自动初始化（前端可能先连 SSE 再发复制请求）
-  if (!sseClients[taskId]) {
-    sseClients[taskId] = [];
-    tasks[taskId] = { aborted: false, paused: false };
-  }
-  res.writeHead(200, {
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
-    'Connection': 'keep-alive'
-  });
-  res.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
-  sseClients[taskId].push(res);
-  req.on('close', () => {
-    sseClients[taskId] = (sseClients[taskId] || []).filter(c => c !== res);
-  });
+  res.json(tasks[taskId] || { done: true });
 });
 
 router.post('/task-cancel/:taskId', (req, res) => {
   const { taskId } = req.params;
   if (tasks[taskId]) {
     tasks[taskId].aborted = true;
-    sendSSE(taskId, { type: 'cancelled' });
     res.json({ success: true });
   } else {
     res.json({ success: false, error: '任务不存在' });
@@ -402,7 +373,6 @@ router.post('/task-pause/:taskId', (req, res) => {
   const { taskId } = req.params;
   if (tasks[taskId]) {
     tasks[taskId].paused = !tasks[taskId].paused;
-    sendSSE(taskId, { type: tasks[taskId].paused ? 'paused' : 'resumed' });
     res.json({ success: true, paused: tasks[taskId].paused });
   } else {
     res.json({ success: false, error: '任务不存在' });

@@ -120,16 +120,14 @@ function renderProjectList() {
     items.forEach(p => {
       const li = document.createElement('li');
       li.className = p.status === 'done' ? 'done-item' : '';
-      li.innerHTML = `<span class="status-dot ${p.status || 'active'}" title="点击切换状态"></span>${escHtml(p.name)}`;
+      const dot = document.createElement('span');
+      dot.className = `status-dot ${p.status || 'active'}`;
+      dot.title = '点击切换状态';
+      dot.onclick = (e) => { e.stopPropagation(); toggleProjectStatus(p.i); };
+      li.appendChild(dot);
+      li.appendChild(document.createTextNode(p.name));
       if (p.i === state.selectedIndex) li.classList.add('active');
-      li.addEventListener('click', (e) => {
-        if (e.target.classList.contains('status-dot')) {
-          e.stopPropagation();
-          toggleProjectStatus(p.i);
-          return;
-        }
-        selectProject(p.i);
-      });
+      li.addEventListener('click', () => selectProject(p.i));
       grp.appendChild(li);
     });
     el.projectList.appendChild(grp);
@@ -305,7 +303,7 @@ function bindEvents() {
     const keyword = el.keywordInput.value.trim() || '项目归档资料';
     const taskId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     showProgress('复制文件到 NAS...');
-    listenProgress(taskId);
+    startPolling(taskId);
     api.post(`/api/projects/${state.selectedIndex}/copy`, { fileNames: files, keyword, taskId }).catch(() => {});
   });
 
@@ -648,9 +646,9 @@ async function copyModifyBatches() {
   }
 }
 
-// ==================== 复制进度条（底部日志面板） ====================
+// ==================== 复制进度条（轮询模式） ====================
 let currentTaskId = null;
-let currentEventSource = null;
+let pollTimer = null;
 
 function showProgress(title) {
   $('logTitle').textContent = title;
@@ -658,40 +656,34 @@ function showProgress(title) {
   $('logText').textContent = '准备中...';
   $('logPanel').style.display = '';
   $('pauseTaskBtn').textContent = '⏸ 暂停';
+  if (pollTimer) clearInterval(pollTimer);
 }
 
 function hideProgress() {
   $('logPanel').style.display = 'none';
-  if (currentEventSource) { currentEventSource.close(); currentEventSource = null; }
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
   currentTaskId = null;
 }
 
-function listenProgress(taskId) {
+function startPolling(taskId) {
   currentTaskId = taskId;
-  if (currentEventSource) currentEventSource.close();
-  currentEventSource = new EventSource(`/api/task-progress/${taskId}`);
-  currentEventSource.onmessage = (e) => {
-    const data = JSON.parse(e.data);
-    if (data.type === 'progress') {
-      const pct = Math.round((data.current / data.total) * 100);
-      $('progressFill').style.width = pct + '%';
-      $('logText').textContent = `${data.current}/${data.total} — ${data.file}`;
-    } else if (data.type === 'complete') {
-      hideProgress();
-      setStatus(data.aborted ? '任务已取消' : `复制完成：成功 ${data.ok} 个，失败 ${data.fail} 个`);
+  pollTimer = setInterval(async () => {
+    const status = await api.get(`/api/task-status/${taskId}`);
+    if (!status || status.done) {
+      clearInterval(pollTimer); pollTimer = null;
+      if (status) {
+        $('progressFill').style.width = '100%';
+        $('logText').textContent = status.aborted ? '已取消' : `完成：成功 ${status.ok||0} 个`;
+        setStatus(status.aborted ? '任务已取消' : '复制完成');
+      }
+      setTimeout(hideProgress, 3000);
       refreshDetail(); refreshModify();
-    } else if (data.type === 'cancelled') {
-      hideProgress();
-      setStatus('任务已取消');
-      refreshDetail(); refreshModify();
-    } else if (data.type === 'paused') {
-      $('pauseTaskBtn').textContent = '▶ 继续';
-      $('logText').textContent = '⏸ 已暂停...';
-    } else if (data.type === 'resumed') {
-      $('pauseTaskBtn').textContent = '⏸ 暂停';
+      return;
     }
-  };
-  currentEventSource.onerror = () => {};
+    const pct = status.total ? Math.round((status.current/status.total)*100) : 0;
+    $('progressFill').style.width = pct + '%';
+    $('logText').textContent = status.file ? `${status.current||0}/${status.total||0} — ${status.file}` : '复制中...';
+  }, 300);
 }
 
 $('cancelTaskBtn').addEventListener('click', async () => {
