@@ -95,8 +95,17 @@ function renderProjectList() {
     (p.status === 'done' ? doneProjects : activeProjects).push({ ...p, i });
   });
 
-  const renderGroup = (label, items) => {
-    if (items.length === 0) return;
+  const renderGroup = (label, items, emptyText) => {
+    if (items.length === 0) {
+      if (emptyText) {
+        const grp = document.createElement('div');
+        grp.className = 'cat-group';
+        grp.innerHTML = `<div class="cat-label" style="cursor:default"><span class="cat-arrow">▼</span> ${label} (0)</div>`;
+        grp.innerHTML += `<div style="padding:4px 16px;font-size:11px;color:#64748b">${emptyText}</div>`;
+        el.projectList.appendChild(grp);
+      }
+      return;
+    }
     const grp = document.createElement('div');
     grp.className = 'cat-group';
     const hdr = document.createElement('div');
@@ -126,8 +135,8 @@ function renderProjectList() {
     el.projectList.appendChild(grp);
   };
 
-  renderGroup('🟢 进行中', activeProjects);
-  renderGroup('✅ 已完成', doneProjects);
+  renderGroup('🟢 进行中', activeProjects, '暂无进行中的项目');
+  renderGroup('✅ 已完成', doneProjects, '暂无已完成的项目（点击项目旁蓝色圆点标记为完成）');
 
   el.projectCount.textContent = state.projects.length;
   el.editProjectBtn.disabled = state.selectedIndex < 0;
@@ -639,19 +648,20 @@ async function copyModifyBatches() {
   }
 }
 
-// ==================== 复制进度条 ====================
+// ==================== 复制进度条（底部日志面板） ====================
 let currentTaskId = null;
 let currentEventSource = null;
 
 function showProgress(title) {
-  $('progressTitle').textContent = title;
+  $('logTitle').textContent = title;
   $('progressFill').style.width = '0%';
-  $('progressText').textContent = '准备中...';
-  $('progressModal').style.display = '';
+  $('logText').textContent = '准备中...';
+  $('logPanel').style.display = '';
+  $('pauseTaskBtn').textContent = '⏸ 暂停';
 }
 
 function hideProgress() {
-  $('progressModal').style.display = 'none';
+  $('logPanel').style.display = 'none';
   if (currentEventSource) { currentEventSource.close(); currentEventSource = null; }
   currentTaskId = null;
 }
@@ -665,17 +675,20 @@ function listenProgress(taskId) {
     if (data.type === 'progress') {
       const pct = Math.round((data.current / data.total) * 100);
       $('progressFill').style.width = pct + '%';
-      $('progressText').textContent = `${data.current}/${data.total} — ${data.file}`;
+      $('logText').textContent = `${data.current}/${data.total} — ${data.file}`;
     } else if (data.type === 'complete') {
       hideProgress();
-      alert(`复制完成：成功 ${data.ok} 个，失败 ${data.fail} 个${data.aborted ? '（已取消）' : ''}`);
-      refreshDetail();
-      refreshModify();
+      setStatus(data.aborted ? '任务已取消' : `复制完成：成功 ${data.ok} 个，失败 ${data.fail} 个`);
+      refreshDetail(); refreshModify();
     } else if (data.type === 'cancelled') {
       hideProgress();
-      alert('任务已取消');
-      refreshDetail();
-      refreshModify();
+      setStatus('任务已取消');
+      refreshDetail(); refreshModify();
+    } else if (data.type === 'paused') {
+      $('pauseTaskBtn').textContent = '▶ 继续';
+      $('logText').textContent = '⏸ 已暂停...';
+    } else if (data.type === 'resumed') {
+      $('pauseTaskBtn').textContent = '⏸ 暂停';
     }
   };
   currentEventSource.onerror = () => {};
@@ -684,6 +697,11 @@ function listenProgress(taskId) {
 $('cancelTaskBtn').addEventListener('click', async () => {
   if (!currentTaskId) return;
   await api.post(`/api/task-cancel/${currentTaskId}`);
+});
+
+$('pauseTaskBtn').addEventListener('click', async () => {
+  if (!currentTaskId) return;
+  await api.post(`/api/task-pause/${currentTaskId}`);
 });
 
 // ==================== 工具函数 ====================

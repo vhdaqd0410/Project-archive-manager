@@ -121,7 +121,7 @@ router.get('/projects/:index/pending', (req, res) => {
 });
 
 // 复制文件到 NAS
-router.post('/projects/:index/copy', (req, res) => {
+router.post('/projects/:index/copy', async (req, res) => {
   const idx = parseInt(req.params.index);
   if (isNaN(idx) || idx < 0 || idx >= projects.length) {
     return res.status(400).json({ error: '无效的项目索引' });
@@ -145,10 +145,17 @@ router.post('/projects/:index/copy', (req, res) => {
     catch (err) { return res.status(400).json({ error: '无法创建 NAS 目录: ' + err.message }); }
   }
 
-  // 逐文件复制，支持进度推送
+  // 初始化任务
+  if (taskId && !tasks[taskId]) tasks[taskId] = { aborted: false, paused: false };
+
+  // 逐文件复制，支持进度推送、暂停、取消
   const total = fileNames.length;
   const results = [];
   for (let i = 0; i < total; i++) {
+    // 等待暂停恢复
+    while (taskId && tasks[taskId] && tasks[taskId].paused && !tasks[taskId].aborted) {
+      await new Promise(r => setTimeout(r, 300));
+    }
     if (taskId && tasks[taskId] && tasks[taskId].aborted) break;
     const name = fileNames[i];
     try {
@@ -363,7 +370,11 @@ function countFiles(dir) {
 // ==================== 任务进度 SSE ====================
 router.get('/task-progress/:taskId', (req, res) => {
   const { taskId } = req.params;
-  if (!sseClients[taskId]) return res.status(404).end();
+  // 自动初始化（前端可能先连 SSE 再发复制请求）
+  if (!sseClients[taskId]) {
+    sseClients[taskId] = [];
+    tasks[taskId] = { aborted: false, paused: false };
+  }
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
@@ -382,6 +393,17 @@ router.post('/task-cancel/:taskId', (req, res) => {
     tasks[taskId].aborted = true;
     sendSSE(taskId, { type: 'cancelled' });
     res.json({ success: true });
+  } else {
+    res.json({ success: false, error: '任务不存在' });
+  }
+});
+
+router.post('/task-pause/:taskId', (req, res) => {
+  const { taskId } = req.params;
+  if (tasks[taskId]) {
+    tasks[taskId].paused = !tasks[taskId].paused;
+    sendSSE(taskId, { type: tasks[taskId].paused ? 'paused' : 'resumed' });
+    res.json({ success: true, paused: tasks[taskId].paused });
   } else {
     res.json({ success: false, error: '任务不存在' });
   }

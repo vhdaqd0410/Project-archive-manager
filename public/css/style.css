@@ -204,6 +204,14 @@ body {
 .btn-accent:hover { background: var(--accent-hover); }
 .btn-danger { background: var(--danger); color: #fff; border-color: var(--danger); }
 
+/* ==================== 运行日志面板 ==================== */
+#logPanel {
+  background: #1e293b; color: #e2e8f0; flex-shrink: 0;
+  border-top: 1px solid #334155;
+}
+#logPanel .btn-sm { padding: 2px 8px; font-size: 11px; }
+#logPanel .progress-bar-wrap { background: #334155; }
+
 /* ==================== 状态栏 ==================== */
 #statusBar {
   height: 28px; padding: 0 16px; display: flex; align-items: center;
@@ -332,8 +340,9 @@ body {
 .cat-label.collapsed .cat-arrow { transform: rotate(-90deg); }
 
 #projectList li .status-dot {
-  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  display: inline-block; width: 12px; height: 12px; border-radius: 50%;
   margin-right: 6px; flex-shrink: 0; cursor: pointer;
+  vertical-align: middle; position: relative; z-index: 1;
 }
 .status-dot.active { background: #3b82f6; box-shadow: 0 0 4px rgba(59,130,246,0.5); }
 .status-dot.done { background: #22c55e; box-shadow: 0 0 4px rgba(34,197,94,0.5); }
