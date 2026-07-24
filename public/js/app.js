@@ -72,6 +72,7 @@ async function init() {
   await loadProjects();
   await loadSettings();
   bindEvents();
+  bindLogPanel();
 }
 
 async function loadProjects() {
@@ -641,14 +642,16 @@ async function refreshLogs() {
   const logs = await api.get('/api/logs');
   $('logContent').innerHTML = logs.length === 0 ? '暂无日志' : logs.map(l => `<div>${escHtml(l)}</div>`).join('');
 }
-$('refreshLogBtn').addEventListener('click', refreshLogs);
-$('clearLogBtn').addEventListener('click', () => { $('logContent').innerHTML = ''; });
 
-// 关机
-$('shutdownBtn').addEventListener('click', async () => {
-  if (!confirm('确定要停止服务吗？')) return;
-  await api.post('/api/shutdown');
-});
+function bindLogPanel() {
+  const rl = $('refreshLogBtn'); if (rl) rl.addEventListener('click', refreshLogs);
+  const cl = $('clearLogBtn'); if (cl) cl.addEventListener('click', () => { $('logContent').innerHTML = ''; });
+  const sd = $('shutdownBtn');
+  if (sd) sd.addEventListener('click', async () => {
+    if (!confirm('确定要停止服务吗？')) return;
+    await api.post('/api/shutdown');
+  });
+}
 
 // ==================== 工具函数 ====================
 function getSelectedProject() {

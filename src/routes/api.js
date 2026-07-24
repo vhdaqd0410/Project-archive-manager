@@ -52,7 +52,7 @@ router.put('/projects/:index', (req, res) => {
   if (isNaN(idx) || idx < 0 || idx >= projects.length) {
     return res.status(400).json({ error: '无效的项目索引' });
   }
-  const { name, localDir, nasDir } = req.body;
+  const { name, localDir, nasDir, status } = req.body;
   if (!name || !name.trim()) {
     return res.status(400).json({ error: '项目名称不能为空' });
   }
@@ -60,7 +60,7 @@ router.put('/projects/:index', (req, res) => {
     name: name.trim(),
     localDir: (localDir || '').trim(),
     nasDir: (nasDir || '').trim(),
-    status: projects[idx].status || 'active'
+    status: status || projects[idx].status || 'active'
   };
   projectService.saveProjects(projects);
   res.json({ success: true, project: projects[idx] });
