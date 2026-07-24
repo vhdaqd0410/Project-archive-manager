@@ -11,8 +11,9 @@ let projects = [];
 let settings = { keyword: '项目归档资料', templates: [] };
 
 // ---------- 任务管理器 ----------
-// ---------- 任务管理器（轮询模式） ----------
-const tasks = {}; // { taskId: { aborted, paused, current, total, file, done, ok, fail } }
+// ---------- 运行日志 ----------
+const logs = [];
+function addLog(msg) { const t = new Date().toLocaleTimeString(); logs.push(`[${t}] ${msg}`); if (logs.length > 200) logs.shift(); }
 
 // 初始化：迁移旧数据并加载
 projectService.migrateOldData();
@@ -107,56 +108,25 @@ router.get('/projects/:index/pending', (req, res) => {
 });
 
 // 复制文件到 NAS
-router.post('/projects/:index/copy', async (req, res) => {
+router.post('/projects/:index/copy', (req, res) => {
   const idx = parseInt(req.params.index);
   if (isNaN(idx) || idx < 0 || idx >= projects.length) {
     return res.status(400).json({ error: '无效的项目索引' });
   }
-
-  const { fileNames, keyword, taskId } = req.body;
+  const { fileNames, keyword } = req.body;
   const kw = keyword || settings.keyword || '项目归档资料';
   const resolved = fileService.resolveEpisodeDirs(projects[idx], kw);
-
-  if (!resolved.relPath) {
-    return res.status(400).json({ error: '未检测到关键词目录' });
-  }
-
-  if (!resolved.localExists) {
-    return res.status(400).json({ error: '本地关键词目录不存在' });
-  }
-
-  // 确保 NAS 目标目录存在
+  if (!resolved.relPath) return res.status(400).json({ error: '未检测到关键词目录' });
+  if (!resolved.localExists) return res.status(400).json({ error: '本地关键词目录不存在' });
   if (!fs.existsSync(resolved.nasEpDir)) {
     try { fs.mkdirSync(resolved.nasEpDir, { recursive: true }); }
     catch (err) { return res.status(400).json({ error: '无法创建 NAS 目录: ' + err.message }); }
   }
-
-  // 初始化任务
-  if (taskId && !tasks[taskId]) tasks[taskId] = { aborted: false, paused: false };
-
-  // 逐文件复制，支持进度推送、暂停、取消
-  const total = fileNames.length;
-  const results = [];
-  for (let i = 0; i < total; i++) {
-    // 等待暂停恢复
-    while (taskId && tasks[taskId] && tasks[taskId].paused && !tasks[taskId].aborted) {
-      await new Promise(r => setTimeout(r, 300));
-    }
-    if (taskId && tasks[taskId] && tasks[taskId].aborted) break;
-    const name = fileNames[i];
-    try {
-      fs.copyFileSync(pathMod.join(resolved.localEpDir, name), pathMod.join(resolved.nasEpDir, name));
-      results.push({ name, success: true });
-    } catch (err) {
-      results.push({ name, success: false, error: err.message });
-    }
-    if (taskId && tasks[taskId]) { tasks[taskId].current = i + 1; tasks[taskId].total = total; tasks[taskId].file = name; tasks[taskId].done = false; }
-  }
-
+  const results = fileService.copyFilesToNas(resolved.localEpDir, resolved.nasEpDir, fileNames);
   const ok = results.filter(r => r.success).length;
   const fail = results.filter(r => !r.success).length;
-  if (taskId && tasks[taskId]) { tasks[taskId].done = true; tasks[taskId].ok = ok; tasks[taskId].fail = fail; }
-  res.json({ success: true, ok, fail, results, taskId });
+  addLog(`文件复制: ${ok} 成功, ${fail} 失败 → ${resolved.nasEpDir}`);
+  res.json({ success: true, ok, fail, results });
 });
 
 // ==================== 文件操作 ====================
@@ -353,30 +323,13 @@ function countFiles(dir) {
   return c;
 }
 
-// ==================== 任务状态轮询 ====================
-router.get('/task-status/:taskId', (req, res) => {
-  const { taskId } = req.params;
-  res.json(tasks[taskId] || { done: true });
-});
+// ==================== 运行日志 ====================
+router.get('/logs', (req, res) => { res.json(logs); });
 
-router.post('/task-cancel/:taskId', (req, res) => {
-  const { taskId } = req.params;
-  if (tasks[taskId]) {
-    tasks[taskId].aborted = true;
-    res.json({ success: true });
-  } else {
-    res.json({ success: false, error: '任务不存在' });
-  }
-});
-
-router.post('/task-pause/:taskId', (req, res) => {
-  const { taskId } = req.params;
-  if (tasks[taskId]) {
-    tasks[taskId].paused = !tasks[taskId].paused;
-    res.json({ success: true, paused: tasks[taskId].paused });
-  } else {
-    res.json({ success: false, error: '任务不存在' });
-  }
+// ==================== 服务控制 ====================
+router.post('/shutdown', (req, res) => {
+  res.json({ success: true, message: '服务即将关闭' });
+  setTimeout(() => process.exit(0), 500);
 });
 
 router.put('/projects/:index/status', (req, res) => {

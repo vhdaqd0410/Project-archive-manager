@@ -50,6 +50,7 @@ const el = {
   formName: $('formName'),
   formLocalDir: $('formLocalDir'),
   formNasDir: $('formNasDir'),
+  formStatus: $('formStatus'),
   importModal: $('importModal'),
   importLocalRoot: $('importLocalRoot'),
   templateList: $('templateList'),
@@ -119,14 +120,8 @@ function renderProjectList() {
 
     items.forEach(p => {
       const li = document.createElement('li');
-      const btn = document.createElement('span');
-      btn.className = 'status-btn';
-      btn.textContent = p.status === 'done' ? '↩' : '✓';
-      btn.title = p.status === 'done' ? '恢复为进行中' : '标记为已完成';
-      btn.onclick = (e) => { e.stopPropagation(); toggleProjectStatus(p.i); };
-      li.appendChild(btn);
-      li.appendChild(document.createTextNode(' ' + p.name));
       if (p.status === 'done') li.classList.add('done-item');
+      li.textContent = p.name;
       if (p.i === state.selectedIndex) li.classList.add('active');
       li.addEventListener('click', () => selectProject(p.i));
       grp.appendChild(li);
@@ -140,13 +135,6 @@ function renderProjectList() {
   el.projectCount.textContent = state.projects.length;
   el.editProjectBtn.disabled = state.selectedIndex < 0;
   el.deleteProjectBtn.disabled = state.selectedIndex < 0;
-}
-
-async function toggleProjectStatus(index) {
-  const newStatus = state.projects[index].status === 'done' ? 'active' : 'done';
-  await api.put(`/api/projects/${index}/status`, { status: newStatus });
-  state.projects[index].status = newStatus;
-  renderProjectList();
 }
 
 function selectProject(index) {
@@ -302,10 +290,10 @@ function bindEvents() {
     if (files.length === 0) { alert('请先勾选要复制的文件'); return; }
     if (!state.currentResolved || !state.currentResolved.relPath) { alert('未检测到关键词目录'); return; }
     const keyword = el.keywordInput.value.trim() || '项目归档资料';
-    const taskId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-    showProgress('复制文件到 NAS...');
-    startPolling(taskId);
-    api.post(`/api/projects/${state.selectedIndex}/copy`, { fileNames: files, keyword, taskId }).catch(() => {});
+    setStatus(`正在复制 ${files.length} 个文件...`);
+    const result = await api.post(`/api/projects/${state.selectedIndex}/copy`, { fileNames: files, keyword });
+    setStatus(result.success ? `复制完成：成功 ${result.ok}，失败 ${result.fail}` : '复制失败');
+    refreshDetail();
   });
 
   // ==================== 项目弹窗事件 ====================
@@ -357,10 +345,12 @@ function openProjectModal(editIndex) {
     el.formName.value = p.name;
     el.formLocalDir.value = p.localDir;
     el.formNasDir.value = p.nasDir;
+    el.formStatus.value = p.status || 'active';
   } else {
     el.formName.value = '';
     el.formLocalDir.value = '';
     el.formNasDir.value = '';
+    el.formStatus.value = 'active';
   }
   el.projectModal.style.display = '';
 }
@@ -375,7 +365,8 @@ async function saveProject() {
   const data = {
     name,
     localDir: el.formLocalDir.value.trim(),
-    nasDir: el.formNasDir.value.trim()
+    nasDir: el.formNasDir.value.trim(),
+    status: el.formStatus.value
   };
   if (state.editingProject >= 0) {
     await api.put(`/api/projects/${state.editingProject}`, data);
@@ -631,10 +622,9 @@ async function copyModifyBatches() {
   });
   if (batchNames.length === 0) { alert('请先勾选要交付的批次'); return; }
   const keyword = '上映单集版';
-  showProgress(`复制 ${batchNames.length} 个批次...`);
+  setStatus(`正在复制 ${batchNames.length} 个批次...`);
   try {
     const result = await api.post(`/api/projects/${state.selectedIndex}/modify-copy-batch`, { batchNames, keyword });
-    hideProgress();
     if (result.success) {
       alert(`复制完成：成功 ${result.ok} 个批次，失败 ${result.fail} 个`);
     } else {
@@ -642,61 +632,22 @@ async function copyModifyBatches() {
     }
     refreshModify();
   } catch (err) {
-    hideProgress();
     alert('请求失败: ' + err.message);
   }
 }
 
-// ==================== 复制进度条（轮询模式） ====================
-let currentTaskId = null;
-let pollTimer = null;
-
-function showProgress(title) {
-  $('logTitle').textContent = title;
-  $('progressFill').style.width = '0%';
-  $('logText').textContent = '准备中...';
-  $('logPanel').style.display = '';
-  $('pauseTaskBtn').textContent = '⏸ 暂停';
-  if (pollTimer) clearInterval(pollTimer);
+// ==================== 日志面板 ====================
+async function refreshLogs() {
+  const logs = await api.get('/api/logs');
+  $('logContent').innerHTML = logs.length === 0 ? '暂无日志' : logs.map(l => `<div>${escHtml(l)}</div>`).join('');
 }
+$('refreshLogBtn').addEventListener('click', refreshLogs);
+$('clearLogBtn').addEventListener('click', () => { $('logContent').innerHTML = ''; });
 
-function hideProgress() {
-  $('logPanel').style.display = 'none';
-  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
-  currentTaskId = null;
-}
-
-function startPolling(taskId) {
-  currentTaskId = taskId;
-  pollTimer = setInterval(async () => {
-    try {
-    const status = await api.get(`/api/task-status/${taskId}`);
-    if (!status || status.done) {
-      clearInterval(pollTimer); pollTimer = null;
-      if (status) {
-        $('progressFill').style.width = '100%';
-        $('logText').textContent = status.aborted ? '已取消' : `完成：成功 ${status.ok||0} 个`;
-        setStatus(status.aborted ? '任务已取消' : '复制完成');
-      }
-      setTimeout(hideProgress, 3000);
-      refreshDetail(); refreshModify();
-      return;
-    }
-    const pct = status.total ? Math.round((status.current/status.total)*100) : 0;
-    $('progressFill').style.width = pct + '%';
-    $('logText').textContent = status.file ? `${status.current||0}/${status.total||0} — ${status.file}` : '复制中...';
-    } catch(e) { /* 网络错误忽略，下次轮询重试 */ }
-  }, 300);
-}
-
-$('cancelTaskBtn').addEventListener('click', async () => {
-  if (!currentTaskId) return;
-  await api.post(`/api/task-cancel/${currentTaskId}`);
-});
-
-$('pauseTaskBtn').addEventListener('click', async () => {
-  if (!currentTaskId) return;
-  await api.post(`/api/task-pause/${currentTaskId}`);
+// 关机
+$('shutdownBtn').addEventListener('click', async () => {
+  if (!confirm('确定要停止服务吗？')) return;
+  await api.post('/api/shutdown');
 });
 
 // ==================== 工具函数 ====================
