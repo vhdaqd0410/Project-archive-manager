@@ -339,12 +339,13 @@ body {
 .cat-label .cat-arrow { font-size: 10px; transition: transform 0.15s; }
 .cat-label.collapsed .cat-arrow { transform: rotate(-90deg); }
 
-#projectList li .status-dot {
-  display: inline-block; width: 12px; height: 12px; border-radius: 50%;
-  margin-right: 6px; flex-shrink: 0; cursor: pointer;
-  vertical-align: middle; position: relative; z-index: 1;
+#projectList li .status-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; border-radius: 50%; font-size: 11px; font-weight: 700;
+  cursor: pointer; background: #334155; color: #22c55e;
+  flex-shrink: 0; margin-right: 6px; vertical-align: middle; user-select: none;
 }
-.status-dot.active { background: #3b82f6; box-shadow: 0 0 4px rgba(59,130,246,0.5); }
-.status-dot.done { background: #22c55e; box-shadow: 0 0 4px rgba(34,197,94,0.5); }
+#projectList li .status-btn:hover { background: #475569; transform: scale(1.1); }
+.done-item .status-btn { color: #f59e0b; }
 #projectList li.done-item { opacity: 0.65; }
 #projectList li.done-item.active { opacity: 0.85; }

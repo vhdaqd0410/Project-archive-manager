@@ -119,13 +119,14 @@ function renderProjectList() {
 
     items.forEach(p => {
       const li = document.createElement('li');
-      li.className = p.status === 'done' ? 'done-item' : '';
-      const dot = document.createElement('span');
-      dot.className = `status-dot ${p.status || 'active'}`;
-      dot.title = '点击切换状态';
-      dot.onclick = (e) => { e.stopPropagation(); toggleProjectStatus(p.i); };
-      li.appendChild(dot);
-      li.appendChild(document.createTextNode(p.name));
+      const btn = document.createElement('span');
+      btn.className = 'status-btn';
+      btn.textContent = p.status === 'done' ? '↩' : '✓';
+      btn.title = p.status === 'done' ? '恢复为进行中' : '标记为已完成';
+      btn.onclick = (e) => { e.stopPropagation(); toggleProjectStatus(p.i); };
+      li.appendChild(btn);
+      li.appendChild(document.createTextNode(' ' + p.name));
+      if (p.status === 'done') li.classList.add('done-item');
       if (p.i === state.selectedIndex) li.classList.add('active');
       li.addEventListener('click', () => selectProject(p.i));
       grp.appendChild(li);
@@ -668,6 +669,7 @@ function hideProgress() {
 function startPolling(taskId) {
   currentTaskId = taskId;
   pollTimer = setInterval(async () => {
+    try {
     const status = await api.get(`/api/task-status/${taskId}`);
     if (!status || status.done) {
       clearInterval(pollTimer); pollTimer = null;
@@ -683,6 +685,7 @@ function startPolling(taskId) {
     const pct = status.total ? Math.round((status.current/status.total)*100) : 0;
     $('progressFill').style.width = pct + '%';
     $('logText').textContent = status.file ? `${status.current||0}/${status.total||0} — ${status.file}` : '复制中...';
+    } catch(e) { /* 网络错误忽略，下次轮询重试 */ }
   }, 300);
 }
 

@@ -150,12 +150,12 @@ router.post('/projects/:index/copy', async (req, res) => {
     } catch (err) {
       results.push({ name, success: false, error: err.message });
     }
-    if (taskId) tasks[taskId] = { ...(tasks[taskId]||{}), current: i + 1, total, file: name, done: false };
+    if (taskId && tasks[taskId]) { tasks[taskId].current = i + 1; tasks[taskId].total = total; tasks[taskId].file = name; tasks[taskId].done = false; }
   }
 
   const ok = results.filter(r => r.success).length;
   const fail = results.filter(r => !r.success).length;
-  if (taskId) tasks[taskId] = { ...(tasks[taskId]||{}), done: true, ok, fail, total };
+  if (taskId && tasks[taskId]) { tasks[taskId].done = true; tasks[taskId].ok = ok; tasks[taskId].fail = fail; }
   res.json({ success: true, ok, fail, results, taskId });
 });
 
