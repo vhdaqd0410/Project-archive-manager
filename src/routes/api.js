@@ -1,0 +1,328 @@
+const express = require('express');
+const router = express.Router();
+const projectService = require('../services/projectService');
+const fileService = require('../services/fileService');
+const importService = require('../services/importService');
+
+// 内存缓存
+let projects = [];
+let settings = { keyword: '项目归档资料', templates: [] };
+
+// 初始化：迁移旧数据并加载
+projectService.migrateOldData();
+projects = projectService.loadProjects();
+settings = projectService.loadSettings();
+
+// ==================== 项目 CRUD ====================
+
+// 获取所有项目
+router.get('/projects', (req, res) => {
+  res.json(projects);
+});
+
+// 新建项目
+router.post('/projects', (req, res) => {
+  const { name, localDir, nasDir } = req.body;
+  if (!name || !name.trim()) {
+    return res.status(400).json({ error: '项目名称不能为空' });
+  }
+  const project = {
+    name: name.trim(),
+    localDir: (localDir || '').trim(),
+    nasDir: (nasDir || '').trim()
+  };
+  projects.push(project);
+  projectService.saveProjects(projects);
+  res.json({ success: true, index: projects.length - 1, project });
+});
+
+// 编辑项目
+router.put('/projects/:index', (req, res) => {
+  const idx = parseInt(req.params.index);
+  if (isNaN(idx) || idx < 0 || idx >= projects.length) {
+    return res.status(400).json({ error: '无效的项目索引' });
+  }
+  const { name, localDir, nasDir } = req.body;
+  if (!name || !name.trim()) {
+    return res.status(400).json({ error: '项目名称不能为空' });
+  }
+  projects[idx] = {
+    name: name.trim(),
+    localDir: (localDir || '').trim(),
+    nasDir: (nasDir || '').trim()
+  };
+  projectService.saveProjects(projects);
+  res.json({ success: true, project: projects[idx] });
+});
+
+// 删除项目
+router.delete('/projects/:index', (req, res) => {
+  const idx = parseInt(req.params.index);
+  if (isNaN(idx) || idx < 0 || idx >= projects.length) {
+    return res.status(400).json({ error: '无效的项目索引' });
+  }
+  projects.splice(idx, 1);
+  projectService.saveProjects(projects);
+  res.json({ success: true });
+});
+
+// ==================== 项目检测与交付 ====================
+
+// 检测关键词目录
+router.get('/projects/:index/detect', (req, res) => {
+  const idx = parseInt(req.params.index);
+  if (isNaN(idx) || idx < 0 || idx >= projects.length) {
+    return res.status(400).json({ error: '无效的项目索引' });
+  }
+  const keyword = req.query.keyword || settings.keyword || '项目归档资料';
+  const result = fileService.resolveEpisodeDirs(projects[idx], keyword);
+  res.json(result);
+});
+
+// 获取待交付文件列表
+router.get('/projects/:index/pending', (req, res) => {
+  const idx = parseInt(req.params.index);
+  if (isNaN(idx) || idx < 0 || idx >= projects.length) {
+    return res.status(400).json({ error: '无效的项目索引' });
+  }
+  const keyword = req.query.keyword || settings.keyword || '项目归档资料';
+  const resolved = fileService.resolveEpisodeDirs(projects[idx], keyword);
+
+  if (!resolved.relPath) {
+    return res.json({ files: [], resolved });
+  }
+
+  const files = fileService.getPendingFiles(resolved.localEpDir, resolved.nasEpDir);
+  res.json({ files, resolved });
+});
+
+// 复制文件到 NAS
+router.post('/projects/:index/copy', (req, res) => {
+  const idx = parseInt(req.params.index);
+  if (isNaN(idx) || idx < 0 || idx >= projects.length) {
+    return res.status(400).json({ error: '无效的项目索引' });
+  }
+
+  const { fileNames, keyword } = req.body;
+  const kw = keyword || settings.keyword || '项目归档资料';
+  const resolved = fileService.resolveEpisodeDirs(projects[idx], kw);
+
+  if (!resolved.relPath) {
+    return res.status(400).json({ error: '未检测到关键词目录' });
+  }
+
+  if (!resolved.localExists) {
+    return res.status(400).json({ error: '本地关键词目录不存在' });
+  }
+
+  // 确保 NAS 目标目录存在
+  const fs = require('fs');
+  if (!fs.existsSync(resolved.nasEpDir)) {
+    try {
+      fs.mkdirSync(resolved.nasEpDir, { recursive: true });
+    } catch (err) {
+      return res.status(400).json({ error: `无法创建 NAS 目录: ${err.message}` });
+    }
+  }
+
+  const results = fileService.copyFilesToNas(resolved.localEpDir, resolved.nasEpDir, fileNames);
+  const ok = results.filter(r => r.success).length;
+  const fail = results.filter(r => !r.success).length;
+
+  res.json({ success: true, ok, fail, results });
+});
+
+// ==================== 文件操作 ====================
+
+// 打开资源管理器
+router.post('/open-explorer', async (req, res) => {
+  const { path: dirPath } = req.body;
+  if (!dirPath) {
+    return res.status(400).json({ error: '路径为空' });
+  }
+  try {
+    await fileService.openExplorer(dirPath);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ==================== 设置管理 ====================
+
+// 获取设置
+router.get('/settings', (req, res) => {
+  res.json(settings);
+});
+
+// 更新设置（关键词等）
+router.put('/settings', (req, res) => {
+  if (req.body.keyword !== undefined) {
+    settings.keyword = req.body.keyword;
+  }
+  projectService.saveSettings(settings);
+  res.json({ success: true, settings });
+});
+
+// ==================== 批量导入 ====================
+
+// 扫描本地根目录
+router.post('/import/scan', (req, res) => {
+  const { localRoot } = req.body;
+  const existingNames = projects.map(p => p.name);
+  const result = importService.scanLocalRoot(localRoot, existingNames);
+  res.json(result);
+});
+
+// 获取部门模板
+router.get('/import/templates', (req, res) => {
+  res.json(settings.templates || []);
+});
+
+// 保存部门模板
+router.put('/import/templates', (req, res) => {
+  const { templates } = req.body;
+  if (!Array.isArray(templates)) {
+    return res.status(400).json({ error: 'templates 必须是数组' });
+  }
+  settings.templates = templates;
+  projectService.saveSettings(settings);
+  res.json({ success: true, templates: settings.templates });
+});
+
+// 批量导入项目
+router.post('/import/batch', (req, res) => {
+  const { items } = req.body;
+  if (!Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ error: 'items 不能为空' });
+  }
+
+  const added = [];
+  for (const item of items) {
+    if (!item.name || !item.localDir) continue;
+    // 检查重名
+    if (projects.some(p => p.name === item.name)) continue;
+    const project = {
+      name: item.name.trim(),
+      localDir: (item.localDir || '').trim(),
+      nasDir: (item.nasDir || '').trim()
+    };
+    projects.push(project);
+    added.push(project);
+  }
+
+  projectService.saveProjects(projects);
+  res.json({ success: true, added: added.length, projects: added });
+});
+
+// ==================== 上映单集版 - 修改交付 ====================
+// 列出上映单集版下的所有子文件夹（修改批次），整个文件夹复制到NAS
+
+router.get('/projects/:index/modify-batches', (req, res) => {
+  const idx = parseInt(req.params.index);
+  if (isNaN(idx) || idx < 0 || idx >= projects.length) {
+    return res.status(400).json({ error: '无效的项目索引' });
+  }
+  const keyword = req.query.keyword || '上映单集版';
+  const p = projects[idx];
+  const fs = require('fs');
+  const pathMod = require('path');
+
+  const rel = fileService.findKeywordDir(p.localDir, keyword) || fileService.findKeywordDir(p.nasDir, keyword);
+  if (!rel) return res.json({ found: false, keyword, batches: [] });
+
+  const localKwDir = pathMod.join(p.localDir, rel);
+  const nasKwDir = pathMod.join(p.nasDir, rel);
+  const nasKwExists = fs.existsSync(nasKwDir);
+
+  const batches = [];
+  if (fs.existsSync(localKwDir)) {
+    try {
+      const dirs = fs.readdirSync(localKwDir, { withFileTypes: true })
+        .filter(d => d.isDirectory())
+        .sort((a, b) => b.name.localeCompare(a.name));
+
+      for (const d of dirs) {
+        const localBatchDir = pathMod.join(localKwDir, d.name);
+        const nasBatchDir = pathMod.join(nasKwDir, d.name);
+        const nasBatchExists = nasKwExists && fs.existsSync(nasBatchDir);
+
+        let localFileCount = 0, nasFileCount = 0;
+        try { localFileCount = countFiles(localBatchDir); } catch {}
+        if (nasBatchExists) {
+          try { nasFileCount = countFiles(nasBatchDir); } catch {}
+        }
+        batches.push({ name: d.name, localPath: localBatchDir, nasPath: nasBatchDir, localFileCount, nasExists: nasBatchExists, nasFileCount });
+      }
+    } catch {}
+  }
+
+  res.json({ found: true, keyword, kwRelPath: rel, localKwDir, nasKwDir, batches });
+});
+
+router.post('/projects/:index/modify-copy-batch', (req, res) => {
+  const idx = parseInt(req.params.index);
+  if (isNaN(idx) || idx < 0 || idx >= projects.length) {
+    return res.status(400).json({ error: '无效的项目索引' });
+  }
+  const { batchNames, keyword } = req.body;
+  if (!Array.isArray(batchNames) || batchNames.length === 0) {
+    return res.status(400).json({ error: '请指定要复制的批次' });
+  }
+  const kw = keyword || '上映单集版';
+  const p = projects[idx];
+  const fs = require('fs');
+  const pathMod = require('path');
+
+  const rel = fileService.findKeywordDir(p.localDir, kw) || fileService.findKeywordDir(p.nasDir, kw);
+  if (!rel) return res.status(400).json({ error: '未找到含"' + kw + '"的目录' });
+
+  const localKwDir = pathMod.join(p.localDir, rel);
+  const nasKwDir = pathMod.join(p.nasDir, rel);
+
+  if (!fs.existsSync(nasKwDir)) {
+    try { fs.mkdirSync(nasKwDir, { recursive: true }); }
+    catch (err) { return res.status(400).json({ error: '无法创建NAS目录: ' + err.message }); }
+  }
+
+  const results = [];
+  for (const batchName of batchNames) {
+    const src = pathMod.join(localKwDir, batchName);
+    const dst = pathMod.join(nasKwDir, batchName);
+    if (!fs.existsSync(src)) { results.push({ name: batchName, success: false, error: '本地批次不存在' }); continue; }
+    try {
+      copyDirRecursive(src, dst);
+      const fileCount = countFiles(dst);
+      results.push({ name: batchName, success: true, fileCount });
+    } catch (err) {
+      results.push({ name: batchName, success: false, error: err.message });
+    }
+  }
+  const ok = results.filter(r => r.success).length;
+  const fail = results.filter(r => !r.success).length;
+  res.json({ success: true, ok, fail, results });
+});
+
+function copyDirRecursive(src, dst) {
+  const fs = require('fs');
+  const pathMod = require('path');
+  if (!fs.existsSync(dst)) fs.mkdirSync(dst, { recursive: true });
+  const entries = fs.readdirSync(src, { withFileTypes: true });
+  for (const entry of entries) {
+    const sp = pathMod.join(src, entry.name);
+    const dp = pathMod.join(dst, entry.name);
+    entry.isDirectory() ? copyDirRecursive(sp, dp) : fs.copyFileSync(sp, dp);
+  }
+}
+
+function countFiles(dir) {
+  const fs = require('fs');
+  const pathMod = require('path');
+  if (!fs.existsSync(dir)) return 0;
+  let c = 0;
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  for (const e of entries) e.isDirectory() ? c += countFiles(pathMod.join(dir, e.name)) : c++;
+  return c;
+}
+
+module.exports = router;

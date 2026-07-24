@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>项目档案管理器</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ==================== 顶部栏 ==================== -->
+  <header id="header">
+    <span class="logo">项目档案管理器</span>
+    <div class="header-right">
+      <input type="text" id="keywordInput" placeholder="识别关键字" title="用于自动检测本地/NAS下含此关键字的子目录">
+      <button id="applyKeywordBtn" class="btn btn-sm btn-primary">应用并扫描</button>
+    </div>
+  </header>
+
+  <!-- ==================== 主体 ==================== -->
+  <div id="main">
+
+    <!-- 左侧：项目列表 -->
+    <aside id="sidebar">
+      <div class="sidebar-header">
+        <span>项目列表</span>
+        <span id="projectCount" class="badge">0</span>
+      </div>
+      <div class="sidebar-search">
+        <input type="text" id="projectSearch" placeholder="🔍 搜索项目...">
+      </div>
+      <ul id="projectList"></ul>
+      <div class="sidebar-actions">
+        <button id="addProjectBtn" class="btn btn-sm btn-primary">+ 新建</button>
+        <button id="editProjectBtn" class="btn btn-sm btn-outline" disabled>编辑</button>
+        <button id="deleteProjectBtn" class="btn btn-sm btn-outline" disabled>删除</button>
+        <button id="batchImportBtn" class="btn btn-sm btn-accent">批量导入</button>
+      </div>
+    </aside>
+
+    <!-- 右侧：详情面板 -->
+    <section id="detailPanel">
+      <div id="emptyState" class="empty-state">
+        <div class="empty-icon">📋</div>
+        <p>请从左侧选择一个项目，或新建项目</p>
+        <p class="empty-hint">💡 添加路径时，可在资源管理器地址栏复制后粘贴到输入框</p>
+      </div>
+
+      <div id="detailContent" style="display:none">
+
+        <!-- 目录信息卡片 -->
+        <div class="card">
+          <div class="card-header">📂 项目目录</div>
+          <div class="card-body">
+            <div class="info-row">
+              <span class="info-label">本地根目录</span>
+              <span class="info-value" id="infoLocalDir" title="">-</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">NAS 根目录</span>
+              <span class="info-value" id="infoNasDir" title="">-</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 关键词检测卡片 -->
+        <div class="card">
+          <div class="card-header">🔍 关键词目录检测</div>
+          <div class="card-body">
+            <div class="detect-row">
+              <span class="detect-label">本地</span>
+              <span class="detect-value" id="detectLocal">未检测</span>
+            </div>
+            <div class="detect-row">
+              <span class="detect-label">NAS</span>
+              <span class="detect-value" id="detectNas">未检测</span>
+            </div>
+            <div class="detect-summary" id="detectSummary"></div>
+          </div>
+        </div>
+
+        <!-- 操作按钮 -->
+        <div class="action-bar">
+          <button id="openLocalBtn" class="btn btn-primary">📂 打开本地目录</button>
+          <button id="openNasBtn" class="btn btn-primary">🌐 打开NAS目录</button>
+          <button id="copyPathBtn" class="btn btn-outline">📋 复制NAS路径</button>
+          <button id="copyMsgBtn" class="btn btn-outline">✉️ 复制交付信息</button>
+        </div>
+
+        <!-- 待交付文件 -->
+        <div class="card">
+          <div class="card-header">
+            ⚠️ 待交付文件（本地有，NAS 无）
+            <span id="pendingCount" class="badge" style="margin-left:8px">0</span>
+          </div>
+          <div class="card-body">
+            <div id="pendingList" class="pending-list"></div>
+            <div class="pending-actions">
+              <button id="refreshPendingBtn" class="btn btn-sm btn-outline">🔄 刷新</button>
+              <button id="checkAllBtn" class="btn btn-sm btn-outline">全选</button>
+              <button id="uncheckAllBtn" class="btn btn-sm btn-outline">取消全选</button>
+              <button id="copySelectedBtn" class="btn btn-sm btn-accent">📤 复制选中到NAS</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 上映单集版 - 修改交付 -->
+        <div class="card">
+          <div class="card-header" style="background:#fef3c7">
+            🎬 上映单集版 · 修改交付
+            <button id="modifyRefreshBtn" class="btn btn-sm btn-outline" style="margin-left:8px">🔄 刷新</button>
+            <span id="modifyCount" class="badge" style="margin-left:8px;background:#d97706">0</span>
+          </div>
+          <div class="card-body">
+            <div id="modifyDetect" class="detect-row">
+              <span class="detect-value" style="font-size:12px;color:#94a3b8">选择项目后自动检测</span>
+            </div>
+            <div id="modifySummary" class="detect-summary" style="margin:4px 0"></div>
+            <div id="modifyList" class="pending-list" style="max-height:220px"></div>
+            <div class="pending-actions">
+              <button id="modifyCheckAllBtn" class="btn btn-sm btn-outline">全选</button>
+              <button id="modifyUncheckBtn" class="btn btn-sm btn-outline">取消全选</button>
+              <button id="modifyCopyBtn" class="btn btn-sm btn-accent">📤 复制选中批次到NAS</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+  </div>
+
+  <!-- 状态栏 -->
+  <footer id="statusBar"><span id="statusText"></span></footer>
+</div>
+
+<!-- ==================== 新建/编辑项目弹窗 ==================== -->
+<div id="projectModal" class="modal" style="display:none">
+  <div class="modal-overlay"></div>
+  <div class="modal-box">
+    <div class="modal-header">
+      <span id="modalTitle">新建项目</span>
+      <button class="modal-close" id="closeProjectModal">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>项目名称</label>
+        <input type="text" id="formName" placeholder="输入项目名称">
+      </div>
+      <div class="form-group">
+        <label>本地根目录 <span class="form-tip">（在资源管理器地址栏点击 → Ctrl+C → 回到此粘贴）</span></label>
+        <input type="text" id="formLocalDir" placeholder="例如：O:\项目归档资料">
+      </div>
+      <div class="form-group">
+        <label>NAS 根目录 <span class="form-tip">（同上，从地址栏复制路径）</span></label>
+        <input type="text" id="formNasDir" placeholder="例如：\\NAS\部门1">
+      </div>
+      <p class="form-hint">只需填根目录，工具会自动查找目录下包含关键字的子文件夹。</p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" id="cancelProjectModal">取消</button>
+      <button class="btn btn-primary" id="saveProjectBtn">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 批量导入弹窗 ==================== -->
+<div id="importModal" class="modal" style="display:none">
+  <div class="modal-overlay"></div>
+  <div class="modal-box modal-wide">
+    <div class="modal-header">
+      <span>批量导入项目</span>
+      <button class="modal-close" id="closeImportModal">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>本地根目录 <span class="form-tip">（从资源管理器地址栏复制路径粘贴）</span></label>
+        <input type="text" id="importLocalRoot" placeholder="例如：O:\所有项目">
+      </div>
+
+      <!-- 部门模板管理 -->
+      <div class="form-group">
+        <label>部门 NAS 模板
+          <span style="font-weight:normal;color:#94a3b8;font-size:12px;margin-left:8px">
+            预设各部门的 NAS 路径，扫描后可为每个子文件夹快速分配
+          </span>
+        </label>
+        <div id="templateList" class="template-list"></div>
+        <button id="addTemplateBtn" class="btn btn-sm btn-outline" style="margin-top:4px">+ 添加模板</button>
+      </div>
+
+      <div style="margin:12px 0">
+        <button id="scanBtn" class="btn btn-primary">🔍 扫描子文件夹</button>
+        <span id="scanSummary" style="margin-left:12px;color:#64748b;font-size:13px"></span>
+      </div>
+
+      <div id="candidateList" class="candidate-list"></div>
+
+      <div id="batchOpsBar" style="display:flex;align-items:center;gap:8px;margin:8px 0">
+        <button id="selectAllCandidatesBtn" class="btn btn-sm btn-outline">全选</button>
+        <button id="deselectAllCandidatesBtn" class="btn btn-sm btn-outline">取消全选</button>
+        <span style="color:#64748b;font-size:13px">批量设置模板:</span>
+        <select id="batchTemplateSelect" class="form-select">
+          <option value="">选择模板...</option>
+        </select>
+        <button id="applyBatchTemplateBtn" class="btn btn-sm btn-primary">应用</button>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" id="closeImportBtn">关闭</button>
+      <button class="btn btn-accent" id="doImportBtn">导入选中项目</button>
+    </div>
+  </div>
+</div>
+
+<script src="/js/app.js"></script>
+</body>
+</html>
