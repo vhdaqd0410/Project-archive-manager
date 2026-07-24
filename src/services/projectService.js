@@ -46,7 +46,8 @@ function migrateOldData() {
   const newProjects = oldProjects.map(p => ({
     name: p.Name || '',
     localDir: p.LocalDir || '',
-    nasDir: p.NasDir || ''
+    nasDir: p.NasDir || '',
+    status: 'active'
   }));
   const dataDir = path.join(__dirname, '..', '..', 'data');
   ensureDir(dataDir);

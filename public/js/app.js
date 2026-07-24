@@ -88,17 +88,57 @@ function renderProjectList() {
   const searchTerm = (el.projectSearch.value || '').trim().toLowerCase();
   el.projectList.innerHTML = '';
 
+  const activeProjects = [];
+  const doneProjects = [];
   state.projects.forEach((p, i) => {
     if (searchTerm && !p.name.toLowerCase().includes(searchTerm)) return;
-    const li = document.createElement('li');
-    li.innerHTML = `<span class="item-icon">📁</span>${escHtml(p.name)}`;
-    if (i === state.selectedIndex) li.classList.add('active');
-    li.addEventListener('click', () => selectProject(i));
-    el.projectList.appendChild(li);
+    (p.status === 'done' ? doneProjects : activeProjects).push({ ...p, i });
   });
+
+  const renderGroup = (label, items) => {
+    if (items.length === 0) return;
+    const grp = document.createElement('div');
+    grp.className = 'cat-group';
+    const hdr = document.createElement('div');
+    hdr.className = 'cat-label';
+    hdr.innerHTML = `<span class="cat-arrow">▼</span> ${label} (${items.length})`;
+    hdr.onclick = () => {
+      hdr.classList.toggle('collapsed');
+      grp.querySelectorAll('li').forEach(li => li.style.display = hdr.classList.contains('collapsed') ? 'none' : '');
+    };
+    grp.appendChild(hdr);
+
+    items.forEach(p => {
+      const li = document.createElement('li');
+      li.className = p.status === 'done' ? 'done-item' : '';
+      li.innerHTML = `<span class="status-dot ${p.status || 'active'}" title="点击切换状态"></span>${escHtml(p.name)}`;
+      if (p.i === state.selectedIndex) li.classList.add('active');
+      li.addEventListener('click', (e) => {
+        if (e.target.classList.contains('status-dot')) {
+          e.stopPropagation();
+          toggleProjectStatus(p.i);
+          return;
+        }
+        selectProject(p.i);
+      });
+      grp.appendChild(li);
+    });
+    el.projectList.appendChild(grp);
+  };
+
+  renderGroup('🟢 进行中', activeProjects);
+  renderGroup('✅ 已完成', doneProjects);
+
   el.projectCount.textContent = state.projects.length;
   el.editProjectBtn.disabled = state.selectedIndex < 0;
   el.deleteProjectBtn.disabled = state.selectedIndex < 0;
+}
+
+async function toggleProjectStatus(index) {
+  const newStatus = state.projects[index].status === 'done' ? 'active' : 'done';
+  await api.put(`/api/projects/${index}/status`, { status: newStatus });
+  state.projects[index].status = newStatus;
+  renderProjectList();
 }
 
 function selectProject(index) {
@@ -252,20 +292,12 @@ function bindEvents() {
     if (state.selectedIndex < 0) return;
     const files = getCheckedPendingFiles();
     if (files.length === 0) { alert('请先勾选要复制的文件'); return; }
-    const p = state.projects[state.selectedIndex];
     if (!state.currentResolved || !state.currentResolved.relPath) { alert('未检测到关键词目录'); return; }
     const keyword = el.keywordInput.value.trim() || '项目归档资料';
-    try {
-      const result = await api.post(`/api/projects/${state.selectedIndex}/copy`, { fileNames: files, keyword });
-      if (result.success) {
-        alert(`复制完成：成功 ${result.ok} 个，失败 ${result.fail} 个`);
-        refreshDetail();
-      } else {
-        alert(`操作失败: ${result.error}`);
-      }
-    } catch (err) {
-      alert('请求失败: ' + err.message);
-    }
+    const taskId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    showProgress('复制文件到 NAS...');
+    listenProgress(taskId);
+    api.post(`/api/projects/${state.selectedIndex}/copy`, { fileNames: files, keyword, taskId }).catch(() => {});
   });
 
   // ==================== 项目弹窗事件 ====================
@@ -591,18 +623,68 @@ async function copyModifyBatches() {
   });
   if (batchNames.length === 0) { alert('请先勾选要交付的批次'); return; }
   const keyword = '上映单集版';
+  showProgress(`复制 ${batchNames.length} 个批次...`);
   try {
     const result = await api.post(`/api/projects/${state.selectedIndex}/modify-copy-batch`, { batchNames, keyword });
+    hideProgress();
     if (result.success) {
       alert(`复制完成：成功 ${result.ok} 个批次，失败 ${result.fail} 个`);
-      refreshModify();
     } else {
       alert(`操作失败: ${result.error}`);
     }
+    refreshModify();
   } catch (err) {
+    hideProgress();
     alert('请求失败: ' + err.message);
   }
 }
+
+// ==================== 复制进度条 ====================
+let currentTaskId = null;
+let currentEventSource = null;
+
+function showProgress(title) {
+  $('progressTitle').textContent = title;
+  $('progressFill').style.width = '0%';
+  $('progressText').textContent = '准备中...';
+  $('progressModal').style.display = '';
+}
+
+function hideProgress() {
+  $('progressModal').style.display = 'none';
+  if (currentEventSource) { currentEventSource.close(); currentEventSource = null; }
+  currentTaskId = null;
+}
+
+function listenProgress(taskId) {
+  currentTaskId = taskId;
+  if (currentEventSource) currentEventSource.close();
+  currentEventSource = new EventSource(`/api/task-progress/${taskId}`);
+  currentEventSource.onmessage = (e) => {
+    const data = JSON.parse(e.data);
+    if (data.type === 'progress') {
+      const pct = Math.round((data.current / data.total) * 100);
+      $('progressFill').style.width = pct + '%';
+      $('progressText').textContent = `${data.current}/${data.total} — ${data.file}`;
+    } else if (data.type === 'complete') {
+      hideProgress();
+      alert(`复制完成：成功 ${data.ok} 个，失败 ${data.fail} 个${data.aborted ? '（已取消）' : ''}`);
+      refreshDetail();
+      refreshModify();
+    } else if (data.type === 'cancelled') {
+      hideProgress();
+      alert('任务已取消');
+      refreshDetail();
+      refreshModify();
+    }
+  };
+  currentEventSource.onerror = () => {};
+}
+
+$('cancelTaskBtn').addEventListener('click', async () => {
+  if (!currentTaskId) return;
+  await api.post(`/api/task-cancel/${currentTaskId}`);
+});
 
 // ==================== 工具函数 ====================
 function getSelectedProject() {

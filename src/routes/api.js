@@ -3,14 +3,36 @@ const router = express.Router();
 const projectService = require('../services/projectService');
 const fileService = require('../services/fileService');
 const importService = require('../services/importService');
+const fs = require('fs');
+const pathMod = require('path');
 
 // 内存缓存
 let projects = [];
 let settings = { keyword: '项目归档资料', templates: [] };
 
+// ---------- 任务管理器 ----------
+const tasks = {}; // { taskId: { aborted: false } }
+const sseClients = {}; // { taskId: [res, res, ...] }
+
+function createTask() {
+  const taskId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  tasks[taskId] = { aborted: false };
+  sseClients[taskId] = [];
+  setTimeout(() => { delete tasks[taskId]; delete sseClients[taskId]; }, 600000); // 10分钟自动清理
+  return taskId;
+}
+
+function sendSSE(taskId, data) {
+  (sseClients[taskId] || []).forEach(client => {
+    client.write(`data: ${JSON.stringify(data)}\n\n`);
+  });
+}
+
 // 初始化：迁移旧数据并加载
 projectService.migrateOldData();
 projects = projectService.loadProjects();
+// 补充旧数据缺失的 status 字段
+projects.forEach(p => { if (!p.status) p.status = 'active'; });
 settings = projectService.loadSettings();
 
 // ==================== 项目 CRUD ====================
@@ -29,7 +51,8 @@ router.post('/projects', (req, res) => {
   const project = {
     name: name.trim(),
     localDir: (localDir || '').trim(),
-    nasDir: (nasDir || '').trim()
+    nasDir: (nasDir || '').trim(),
+    status: 'active'
   };
   projects.push(project);
   projectService.saveProjects(projects);
@@ -49,7 +72,8 @@ router.put('/projects/:index', (req, res) => {
   projects[idx] = {
     name: name.trim(),
     localDir: (localDir || '').trim(),
-    nasDir: (nasDir || '').trim()
+    nasDir: (nasDir || '').trim(),
+    status: projects[idx].status || 'active'
   };
   projectService.saveProjects(projects);
   res.json({ success: true, project: projects[idx] });
@@ -103,7 +127,7 @@ router.post('/projects/:index/copy', (req, res) => {
     return res.status(400).json({ error: '无效的项目索引' });
   }
 
-  const { fileNames, keyword } = req.body;
+  const { fileNames, keyword, taskId } = req.body;
   const kw = keyword || settings.keyword || '项目归档资料';
   const resolved = fileService.resolveEpisodeDirs(projects[idx], kw);
 
@@ -116,20 +140,30 @@ router.post('/projects/:index/copy', (req, res) => {
   }
 
   // 确保 NAS 目标目录存在
-  const fs = require('fs');
   if (!fs.existsSync(resolved.nasEpDir)) {
-    try {
-      fs.mkdirSync(resolved.nasEpDir, { recursive: true });
-    } catch (err) {
-      return res.status(400).json({ error: `无法创建 NAS 目录: ${err.message}` });
-    }
+    try { fs.mkdirSync(resolved.nasEpDir, { recursive: true }); }
+    catch (err) { return res.status(400).json({ error: '无法创建 NAS 目录: ' + err.message }); }
   }
 
-  const results = fileService.copyFilesToNas(resolved.localEpDir, resolved.nasEpDir, fileNames);
+  // 逐文件复制，支持进度推送
+  const total = fileNames.length;
+  const results = [];
+  for (let i = 0; i < total; i++) {
+    if (taskId && tasks[taskId] && tasks[taskId].aborted) break;
+    const name = fileNames[i];
+    try {
+      fs.copyFileSync(pathMod.join(resolved.localEpDir, name), pathMod.join(resolved.nasEpDir, name));
+      results.push({ name, success: true });
+    } catch (err) {
+      results.push({ name, success: false, error: err.message });
+    }
+    if (taskId) sendSSE(taskId, { type: 'progress', current: i + 1, total, file: name });
+  }
+
   const ok = results.filter(r => r.success).length;
   const fail = results.filter(r => !r.success).length;
-
-  res.json({ success: true, ok, fail, results });
+  if (taskId) sendSSE(taskId, { type: 'complete', ok, fail, total, aborted: tasks[taskId] && tasks[taskId].aborted });
+  res.json({ success: true, ok, fail, results, taskId });
 });
 
 // ==================== 文件操作 ====================
@@ -205,7 +239,8 @@ router.post('/import/batch', (req, res) => {
     const project = {
       name: item.name.trim(),
       localDir: (item.localDir || '').trim(),
-      nasDir: (item.nasDir || '').trim()
+      nasDir: (item.nasDir || '').trim(),
+      status: 'active'
     };
     projects.push(project);
     added.push(project);
@@ -324,5 +359,46 @@ function countFiles(dir) {
   for (const e of entries) e.isDirectory() ? c += countFiles(pathMod.join(dir, e.name)) : c++;
   return c;
 }
+
+// ==================== 任务进度 SSE ====================
+router.get('/task-progress/:taskId', (req, res) => {
+  const { taskId } = req.params;
+  if (!sseClients[taskId]) return res.status(404).end();
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive'
+  });
+  res.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
+  sseClients[taskId].push(res);
+  req.on('close', () => {
+    sseClients[taskId] = (sseClients[taskId] || []).filter(c => c !== res);
+  });
+});
+
+router.post('/task-cancel/:taskId', (req, res) => {
+  const { taskId } = req.params;
+  if (tasks[taskId]) {
+    tasks[taskId].aborted = true;
+    sendSSE(taskId, { type: 'cancelled' });
+    res.json({ success: true });
+  } else {
+    res.json({ success: false, error: '任务不存在' });
+  }
+});
+
+router.put('/projects/:index/status', (req, res) => {
+  const idx = parseInt(req.params.index);
+  if (isNaN(idx) || idx < 0 || idx >= projects.length) {
+    return res.status(400).json({ error: '无效的项目索引' });
+  }
+  const { status } = req.body;
+  if (!['active', 'done'].includes(status)) {
+    return res.status(400).json({ error: '状态值无效' });
+  }
+  projects[idx].status = status;
+  projectService.saveProjects(projects);
+  res.json({ success: true, status });
+});
 
 module.exports = router;
