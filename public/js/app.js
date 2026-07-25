@@ -7,6 +7,7 @@ var api = {
 
 var projects = [], settings = {}, sel = -1, resolved = null, scanResults = [];
 var nasDirModify = '', nasDir000 = '';
+var localDirModify = '', localDir000 = '';
 var batchSel = {};
 
 window.onload = async function() {
@@ -91,8 +92,8 @@ function selectProject(idx) {
     '<div class="card"><div class="card-hdr">🔍 关键词目录检测</div><div class="card-body"><div id="detectLocal" style="font-size:12px;color:#94a3b8">扫描中...</div><div id="detectNas" style="font-size:12px;color:#94a3b8">扫描中...</div><div id="detectSummary" style="font-size:12px;margin-top:4px"></div></div></div>' +
     '<div class="act-bar"><button class="btn btn-primary" id="btnOpenLocal">打开本地</button><button class="btn btn-primary" id="btnOpenNas">打开NAS</button><button class="btn btn-outline" id="btnCopyPath">复制NAS路径</button><button class="btn btn-outline" id="btnCopyMsg">复制交付信息</button></div>' +
     '<div class="card"><div class="card-hdr">⚠ 待交付文件 <span id="pendingCount" style="margin-left:8px">0</span></div><div class="card-body"><div class="pending-list" id="pendingList"></div><div class="act-bar"><button class="btn btn-sm btn-outline" id="btnRefresh">刷新</button><button class="btn btn-sm btn-outline" id="btnCheckAll">全选</button><button class="btn btn-sm btn-outline" id="btnUncheckAll">取消全选</button><button class="btn btn-sm btn-warn" id="btnCopy">复制选中到NAS</button></div></div></div>' +
-    '<div class="card"><div class="card-hdr">🎬 上映单集版 · 修改交付 <span id="modifyCount" style="margin-left:8px">0</span></div><div class="card-body"><div id="modifyInfo" style="font-size:11px;color:#94a3b8">检测中...</div><div id="modifySummary" style="font-size:12px;margin:4px 0"></div><div class="pending-list" id="modifyList"></div><div class="act-bar"><button class="btn btn-sm btn-outline" id="btnModRefresh">刷新</button><button class="btn btn-sm btn-outline" id="btnModCheckAll">全选</button><button class="btn btn-sm btn-outline" id="btnModUncheckAll">取消全选</button><button class="btn btn-sm btn-outline" id="btnModCopyPath">复制NAS路径</button><button class="btn btn-sm btn-warn" id="btnModCopy">复制选中到NAS</button></div></div></div>' +
-    '<div class="card"><div class="card-hdr">📦 000交付 <span id="count000" style="margin-left:8px">0</span></div><div class="card-body"><div id="info000" style="font-size:11px;color:#94a3b8">检测中...</div><div id="summary000" style="font-size:12px;margin:4px 0"></div><div class="pending-list" id="list000"></div><div class="act-bar"><button class="btn btn-sm btn-outline" id="btn000Refresh">刷新</button><button class="btn btn-sm btn-outline" id="btn000CheckAll">全选</button><button class="btn btn-sm btn-outline" id="btn000UncheckAll">取消全选</button><button class="btn btn-sm btn-outline" id="btn000CopyPath">复制NAS路径</button><button class="btn btn-sm btn-warn" id="btn000Copy">复制选中到NAS</button></div></div></div>' +
+    '<div class="card"><div class="card-hdr">🎬 上映单集版 · 修改交付 <span id="modifyCount" style="margin-left:8px">0</span></div><div class="card-body"><div id="modifyInfo" style="font-size:11px;color:#94a3b8">检测中...</div><div id="modifySummary" style="font-size:12px;margin:4px 0"></div><div class="pending-list" id="modifyList"></div><div class="act-bar"><button class="btn btn-sm btn-primary" id="btnModOpenLocal">打开本地</button><button class="btn btn-sm btn-primary" id="btnModOpenNas">打开NAS</button><button class="btn btn-sm btn-outline" id="btnModRefresh">刷新</button><button class="btn btn-sm btn-outline" id="btnModCheckAll">全选</button><button class="btn btn-sm btn-outline" id="btnModUncheckAll">取消全选</button><button class="btn btn-sm btn-outline" id="btnModCopyPath">复制路径</button><button class="btn btn-sm btn-warn" id="btnModCopy">复制选中到NAS</button></div></div></div>' +
+    '<div class="card"><div class="card-hdr">📦 000交付 <span id="count000" style="margin-left:8px">0</span></div><div class="card-body"><div id="info000" style="font-size:11px;color:#94a3b8">检测中...</div><div id="summary000" style="font-size:12px;margin:4px 0"></div><div class="pending-list" id="list000"></div><div class="act-bar"><button class="btn btn-sm btn-primary" id="btn000OpenLocal">打开本地</button><button class="btn btn-sm btn-primary" id="btn000OpenNas">打开NAS</button><button class="btn btn-sm btn-outline" id="btn000Refresh">刷新</button><button class="btn btn-sm btn-outline" id="btn000CheckAll">全选</button><button class="btn btn-sm btn-outline" id="btn000UncheckAll">取消全选</button><button class="btn btn-sm btn-outline" id="btn000CopyPath">复制路径</button><button class="btn btn-sm btn-warn" id="btn000Copy">复制选中到NAS</button></div></div></div>' +
     '<div class="card"><div class="card-hdr">📋 运行日志</div><div class="card-body" id="logPanel" style="max-height:200px;overflow-y:auto;font-family:Consolas,monospace;font-size:11px;color:#64748b;padding:8px 12px"><div id="logContent">就绪</div></div></div>';
   bindEvents();
   refreshDetail();
@@ -113,12 +114,16 @@ function bindEvents() {
   b = $('btnModCheckAll'); if (b) b.onclick = function() { checkAll('modifyList', true); };
   b = $('btnModUncheckAll'); if (b) b.onclick = function() { checkAll('modifyList', false); };
   b = $('btnModCopy'); if (b) b.onclick = copyModifyBatches;
-  b = $('btnModCopyPath'); if (b) b.onclick = function() { copyText(nasDirModify); };
+  b = $('btnModCopyPath'); if (b) b.onclick = function() { copyCheckedPaths('modifyList', nasDirModify); };
+  b = $('btnModOpenLocal'); if (b) b.onclick = function() { api.post('/api/open-explorer', { path: localDirModify }); };
+  b = $('btnModOpenNas'); if (b) b.onclick = function() { api.post('/api/open-explorer', { path: nasDirModify }); };
   b = $('btn000Refresh'); if (b) b.onclick = refresh000;
   b = $('btn000CheckAll'); if (b) b.onclick = function() { checkAll('list000', true); };
   b = $('btn000UncheckAll'); if (b) b.onclick = function() { checkAll('list000', false); };
   b = $('btn000Copy'); if (b) b.onclick = copy000Delivery;
-  b = $('btn000CopyPath'); if (b) b.onclick = function() { copyText(nasDir000); };
+  b = $('btn000CopyPath'); if (b) b.onclick = function() { copyCheckedPaths('list000', nasDir000); };
+  b = $('btn000OpenLocal'); if (b) b.onclick = function() { api.post('/api/open-explorer', { path: localDir000 }); };
+  b = $('btn000OpenNas'); if (b) b.onclick = function() { api.post('/api/open-explorer', { path: nasDir000 }); };
 }
 
 // ==================== 异步日志逐条显示 ====================
@@ -196,7 +201,7 @@ async function refreshModify() {
     }
     mc.textContent = nc + ' 待交付';
     ms.innerHTML = nc > 0 ? '<span style="color:#f59e0b">' + nc + ' 个批次待交付</span>' : '<span style="color:#22c55e">全部已交付</span>';
-    nasDirModify = data.nasKwDir || '';
+    nasDirModify = data.nasKwDir || "; localDirModify = data.localKwDir || ";
   } catch(e) { ($('modifyInfo')||{}).textContent = '检测失败: ' + e.message; }
 }
 
@@ -306,7 +311,7 @@ async function refresh000() {
   }
   mc.textContent = nc + ' 待交付';
   ms.innerHTML = nc > 0 ? '<span style="color:#f59e0b">' + nc + ' 个文件夹待交付</span>' : '<span style="color:#22c55e">全部已交付</span>';
-    nasDir000 = data.nasKwDir || '';
+    nasDir000 = data.nasKwDir || "; localDir000 = data.localKwDir || ";
   } catch(e) { ($('info000')||{}).textContent = '检测失败: ' + e.message; }
 }
 
@@ -331,6 +336,16 @@ function esc(s) { var d = document.createElement('div'); d.textContent = s || ''
 function escAttr(s) { return (s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function checkAll(listId, checked) { var cbs = document.querySelectorAll('#' + listId + ' input[type=checkbox]'); for (var i = 0; i < cbs.length; i++) cbs[i].checked = checked; }
 function copyText(text) { navigator.clipboard.writeText(text).catch(function() {}); setStatus('已复制'); }
+function copyCheckedPaths(listId, baseDir) {
+  var cbs = document.querySelectorAll('#' + listId + ' input[type=checkbox]');
+  var paths = [];
+  for (var i = 0; i < cbs.length; i++) if (cbs[i].checked) {
+    var name = cbs[i].nextElementSibling.textContent.split(' (')[0];
+    paths.push(baseDir + '\\' + name);
+  }
+  if (paths.length === 0) paths.push(baseDir);
+  copyText(paths.join('\n'));
+}
 function copyDeliveryMsg() {
   if (sel < 0) return;
   var path = (resolved && resolved.nasEpDir) || projects[sel].nasDir;
