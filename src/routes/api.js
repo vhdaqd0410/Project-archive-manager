@@ -79,7 +79,7 @@ router.post('/projects/:index/copy', (req, res) => {
   if (!fs.existsSync(r.nasEpDir)) fs.mkdirSync(r.nasEpDir, { recursive: true });
   const results = fileService.copyFilesToNas(r.localEpDir, r.nasEpDir, fileNames);
   const ok = results.filter(r => r.success).length;
-  res.json({ success: true, ok, fail: results.length - ok });
+  res.json({ success: true, ok, fail: results.length - ok, results, nasDir: r.nasEpDir });
 });
 
 // ==================== 设置 ====================
@@ -162,11 +162,15 @@ router.post('/projects/:index/modify-copy-batch', (req, res) => {
   const lk = path.join(p.localDir, rel);
   const nk = path.join(p.nasDir, rel);
   if (!fs.existsSync(nk)) fs.mkdirSync(nk, { recursive: true });
+  const results = [];
   let ok = 0, fail = 0;
   for (const name of batchNames) {
-    try { fileService.copyDirRecursive(path.join(lk, name), path.join(nk, name)); ok++; } catch { fail++; }
+    try {
+      fileService.copyDirRecursive(path.join(lk, name), path.join(nk, name));
+      ok++; results.push({ name, success: true, count: countFiles(path.join(nk, name)) });
+    } catch { fail++; results.push({ name, success: false }); }
   }
-  res.json({ success: true, ok, fail });
+  res.json({ success: true, ok, fail, results, nasDir: nk });
 });
 
 // 递归复制
@@ -177,5 +181,14 @@ fileService.copyDirRecursive = function(src, dst) {
     e.isDirectory() ? fileService.copyDirRecursive(sp, dp) : fs.copyFileSync(sp, dp);
   }
 };
+
+// 统计文件数
+function countFiles(dir) {
+  if (!fs.existsSync(dir)) return 0;
+  let c = 0;
+  for (const e of fs.readdirSync(dir, { withFileTypes: true }))
+    c += e.isDirectory() ? countFiles(path.join(dir, e.name)) : 1;
+  return c;
+}
 
 module.exports = router;
