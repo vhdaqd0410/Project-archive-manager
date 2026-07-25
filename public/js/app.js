@@ -88,21 +88,13 @@ function bindEvents() {
   b = $('btn000CopyPath'); if (b) b.onclick = function() { copyText(nasDir000); };
 }
 
-// ==================== 流式读取 ====================
-async function readStream(response) {
-  var reader = response.body.getReader(), decoder = new TextDecoder(), buf = '';
-  while (true) {
-    var r = await reader.read(); if (r.done) break;
-    buf += decoder.decode(r.value, { stream: true });
-    var lines = buf.split('\n'); buf = lines.pop();
-    for (var i = 0; i < lines.length; i++) {
-      var line = lines[i]; if (!line.trim()) continue;
-      try { var d = JSON.parse(line);
-        if (d.done) return d; else addLog((d.success ? '✓' : '✗') + ' ' + (d.file || d.item || '?'));
-      } catch(e) {}
-    }
+// ==================== 异步日志逐条显示 ====================
+async function logResults(results, prefix) {
+  for (var i = 0; i < results.length; i++) {
+    var r = results[i];
+    addLog((r.success ? '✓' : '✗') + ' ' + (prefix || '') + (r.file || r.name || '?'));
+    await new Promise(function(resolve) { setTimeout(resolve, 30); });
   }
-  return {};
 }
 
 // ==================== 检测 ====================
@@ -143,11 +135,11 @@ async function copyPending() {
   var files = []; for (var i = 0; i < cbs.length; i++) if (cbs[i].checked) files.push(cbs[i].nextElementSibling.textContent);
   if (files.length === 0) { alert('请先勾选'); return; }
   addLog('📤 开始复制 ' + files.length + ' 个文件...');
-  var resp = await fetch('/api/projects/' + sel + '/copy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fileNames: files, keyword: $('keywordInput').value || '项目归档资料' }) });
-  var d = await readStream(resp);
-  addLog('✅ 完成：' + (d.ok||0) + ' 成功 / ' + (d.fail||0) + ' 失败');
-  if (d.nasDir) addLog('📍 NAS: ' + d.nasDir);
-  setStatus('复制完成：成功 ' + (d.ok||0) + ' 个');
+  var r = await api.post('/api/projects/' + sel + '/copy', { fileNames: files, keyword: $('keywordInput').value || '项目归档资料' });
+  if (r.results) await logResults(r.results, '');
+  addLog('✅ 完成：' + (r.ok||0) + ' 成功 / ' + (r.fail||0) + ' 失败');
+  if (r.nasDir) addLog('📍 NAS: ' + r.nasDir);
+  setStatus('复制完成：成功 ' + (r.ok||0) + ' 个');
   refreshDetail();
 }
 
@@ -180,11 +172,11 @@ async function copyModifyBatches() {
   var names = []; for (var i = 0; i < cbs.length; i++) if (cbs[i].checked) names.push(cbs[i].nextElementSibling.textContent.split(' (')[0]);
   if (names.length === 0) { alert('请先勾选'); return; }
   addLog('📤 开始复制 ' + names.length + ' 个批次...');
-  var resp = await fetch('/api/projects/' + sel + '/modify-copy-batch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ batchNames: names, keyword: '上映单集版' }) });
-  var d = await readStream(resp);
-  addLog('✅ 完成：' + (d.ok||0) + ' 成功 / ' + (d.fail||0) + ' 失败');
-  if (d.nasDir) addLog('📍 NAS: ' + d.nasDir);
-  setStatus('完成：' + (d.ok||0) + ' 成功');
+  var r = await api.post('/api/projects/' + sel + '/modify-copy-batch', { batchNames: names, keyword: '上映单集版' });
+  if (r.results) await logResults(r.results, '');
+  addLog('✅ 完成：' + (r.ok||0) + ' 成功 / ' + (r.fail||0) + ' 失败');
+  if (r.nasDir) addLog('📍 NAS: ' + r.nasDir);
+  setStatus('完成：' + (r.ok||0) + ' 成功');
   refreshModify();
 }
 
@@ -290,11 +282,11 @@ async function copy000Delivery() {
   var names = []; for (var i = 0; i < cbs.length; i++) if (cbs[i].checked) names.push(cbs[i].nextElementSibling.textContent.split(' (')[0]);
   if (names.length === 0) { alert('请先勾选'); return; }
   addLog('📤 开始复制 ' + names.length + ' 个文件夹...');
-  var resp = await fetch('/api/projects/' + sel + '/modify-copy-batch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ batchNames: names, keyword: '000交付' }) });
-  var d = await readStream(resp);
-  addLog('✅ 完成：' + (d.ok||0) + ' 成功 / ' + (d.fail||0) + ' 失败');
-  if (d.nasDir) addLog('📍 NAS: ' + d.nasDir);
-  setStatus('完成：' + (d.ok||0) + ' 成功');
+  var r = await api.post('/api/projects/' + sel + '/modify-copy-batch', { batchNames: names, keyword: '000交付' });
+  if (r.results) await logResults(r.results, '');
+  addLog('✅ 完成：' + (r.ok||0) + ' 成功 / ' + (r.fail||0) + ' 失败');
+  if (r.nasDir) addLog('📍 NAS: ' + r.nasDir);
+  setStatus('完成：' + (r.ok||0) + ' 成功');
   refresh000();
 }
 

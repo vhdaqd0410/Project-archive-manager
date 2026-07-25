@@ -77,15 +77,15 @@ router.post('/projects/:index/copy', (req, res) => {
   if (!r.relPath) return res.status(400).json({ error: '未检测到关键词目录' });
   if (!r.localExists) return res.status(400).json({ error: '本地不存在' });
   if (!fs.existsSync(r.nasEpDir)) fs.mkdirSync(r.nasEpDir, { recursive: true });
-  res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Transfer-Encoding': 'chunked' });
+  const results = [];
   let ok = 0, fail = 0;
   for (const f of (Array.isArray(fileNames) ? fileNames : [])) {
     try {
       fs.copyFileSync(path.join(r.localEpDir, f), path.join(r.nasEpDir, f));
-      ok++; res.write(JSON.stringify({ file: f, success: true }) + '\n');
-    } catch(e) { fail++; res.write(JSON.stringify({ file: f, success: false }) + '\n'); }
+      ok++; results.push({ file: f, success: true });
+    } catch(e) { fail++; results.push({ file: f, success: false }); }
   }
-  res.end(JSON.stringify({ done: true, ok, fail, nasDir: r.nasEpDir }) + '\n');
+  res.json({ success: true, ok, fail, results, nasDir: r.nasEpDir });
 });
 
 // ==================== 设置 ====================
@@ -168,15 +168,15 @@ router.post('/projects/:index/modify-copy-batch', (req, res) => {
   const lk = path.join(p.localDir, rel);
   const nk = path.join(p.nasDir, rel);
   if (!fs.existsSync(nk)) fs.mkdirSync(nk, { recursive: true });
-  res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Transfer-Encoding': 'chunked' });
+  const results = [];
   let ok = 0, fail = 0;
   for (const name of batchNames) {
     try {
       fileService.copyDirRecursive(path.join(lk, name), path.join(nk, name));
-      ok++; res.write(JSON.stringify({ item: name, success: true }) + '\n');
-    } catch { fail++; res.write(JSON.stringify({ item: name, success: false }) + '\n'); }
+      ok++; results.push({ name, success: true });
+    } catch { fail++; results.push({ name, success: false }); }
   }
-  res.end(JSON.stringify({ done: true, ok, fail, nasDir: nk }) + '\n');
+  res.json({ success: true, ok, fail, results, nasDir: nk });
 });
 
 // 递归复制
