@@ -128,9 +128,9 @@ function bindEvents() {
   b = $('btn000CheckAll'); if (b) b.onclick = function() { checkAll('list000', true); };
   b = $('btn000UncheckAll'); if (b) b.onclick = function() { checkAll('list000', false); };
   b = $('btn000Copy'); if (b) b.onclick = copy000Delivery;
-  b = $('btn000CopyPath'); if (b) b.onclick = function() { copyCheckedPaths('list000', nasDir000); };
-  b = $('btn000OpenLocal'); if (b) b.onclick = function() { openCheckedDir('list000', localDir000); };
-  b = $('btn000OpenNas'); if (b) b.onclick = function() { openCheckedDir('list000', nasDir000); };
+  b = $('btn000CopyPath'); if (b) b.onclick = function() { copyText(nasDir000); };
+  b = $('btn000OpenLocal'); if (b) b.onclick = function() { api.post('/api/open-explorer', { path: localDir000 }); };
+  b = $('btn000OpenNas'); if (b) b.onclick = function() { api.post('/api/open-explorer', { path: nasDir000 }); };
 }
 
 // ==================== 异步日志逐条显示 ====================
