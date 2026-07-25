@@ -180,11 +180,14 @@ async function copyPending() {
   var files = []; for (var i = 0; i < cbs.length; i++) if (cbs[i].checked) files.push(cbs[i].nextElementSibling.textContent);
   if (files.length === 0) { alert('请先勾选'); return; }
   addLog('📤 开始复制 ' + files.length + ' 个文件...');
-  var r = await api.post('/api/projects/' + sel + '/copy', { fileNames: files, keyword: $('keywordInput').value || '项目归档资料' });
-  if (r.results) await logResults(r.results, '');
-  addLog('✅ 完成：' + (r.ok||0) + ' 成功 / ' + (r.fail||0) + ' 失败');
-  if (r.nasDir) addLog('📍 NAS: ' + r.nasDir);
-  setStatus('复制完成：成功 ' + (r.ok||0) + ' 个');
+  var ok = 0, fail = 0;
+  for (var i = 0; i < files.length; i++) {
+    var r = await api.post('/api/projects/' + sel + '/copy', { fileNames: [files[i]], keyword: $('keywordInput').value || '项目归档资料' });
+    if (r.ok > 0) { ok++; addLog('✓ ' + files[i]); } else { fail++; addLog('✗ ' + files[i]); }
+    setStatus('复制中：' + (i + 1) + '/' + files.length);
+  }
+  addLog('✅ 完成：' + ok + ' 成功 / ' + fail + ' 失败');
+  setStatus('复制完成：成功 ' + ok + ' 个');
   refreshDetail();
 }
 
@@ -221,14 +224,13 @@ async function copyModifyBatches() {
   // 记住勾选状态
   for (var i = 0; i < names.length; i++) checkedModify[names[i]] = true;
   addLog('📤 开始复制 ' + names.length + ' 个批次...');
-  var r = await api.post('/api/projects/' + sel + '/modify-copy-batch', { batchNames: names, keyword: '上映单集版' });
-  if (r.results) {
-    for (var i = 0; i < r.results.length; i++) {
-      var x = r.results[i]; var fullPath = (r.nasDir || nasDirModify) + '\\' + (x.item || x.name);
-      addLog((x.success ? '✓' : '✗') + ' ' + (x.item || x.name) + (x.success ? ' → ' + fullPath : ''));
-    }
+  var ok = 0, fail = 0;
+  for (var i = 0; i < names.length; i++) {
+    var r = await api.post('/api/projects/' + sel + '/modify-copy-batch', { batchNames: [names[i]], keyword: '上映单集版' });
+    if (r.ok > 0) { ok++; addLog('✓ ' + names[i]); } else { fail++; addLog('✗ ' + names[i]); }
+    setStatus('复制中：' + (i + 1) + '/' + names.length);
   }
-  addLog('✅ 完成：' + (r.ok||0) + ' 成功 / ' + (r.fail||0) + ' 失败');
+  addLog('✅ 完成：' + ok + ' 成功 / ' + fail + ' 失败');
   setStatus('完成：' + (r.ok||0) + ' 成功');
   refreshModify();
 }
@@ -338,14 +340,13 @@ async function copy000Delivery() {
   if (names.length === 0) { alert('请先勾选'); return; }
   for (var i = 0; i < names.length; i++) checked000[names[i]] = true;
   addLog('📤 开始复制 ' + names.length + ' 个文件夹...');
-  var r = await api.post('/api/projects/' + sel + '/modify-copy-batch', { batchNames: names, keyword: '000交付' });
-  if (r.results) {
-    for (var i = 0; i < r.results.length; i++) {
-      var x = r.results[i]; var fullPath = (r.nasDir || nasDir000) + '\\' + (x.item || x.name);
-      addLog((x.success ? '✓' : '✗') + ' ' + (x.item || x.name) + (x.success ? ' → ' + fullPath : ''));
-    }
+  var ok = 0, fail = 0;
+  for (var i = 0; i < names.length; i++) {
+    var r = await api.post('/api/projects/' + sel + '/modify-copy-batch', { batchNames: [names[i]], keyword: '000交付' });
+    if (r.ok > 0) { ok++; addLog('✓ ' + names[i]); } else { fail++; addLog('✗ ' + names[i]); }
+    setStatus('复制中：' + (i + 1) + '/' + names.length);
   }
-  addLog('✅ 完成：' + (r.ok||0) + ' 成功 / ' + (r.fail||0) + ' 失败');
+  addLog('✅ 完成：' + ok + ' 成功 / ' + fail + ' 失败');
   setStatus('完成：' + (r.ok||0) + ' 成功');
   refresh000();
 }
