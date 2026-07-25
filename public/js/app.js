@@ -77,16 +77,17 @@ function bindEvents() {
   b = $('btnModCheckAll'); if (b) b.onclick = function() { checkAll('modifyList', true); };
   b = $('btnModUncheckAll'); if (b) b.onclick = function() { checkAll('modifyList', false); };
   b = $('btnModCopy'); if (b) b.onclick = copyModifyBatches;
-  b = $('btn000Refresh'); if (b) b.onclick = refresh000Delivery;
-  b = $('btn000CheckAll'); if (b) b.onclick = function() { checkAll('000List', true); };
-  b = $('btn000UncheckAll'); if (b) b.onclick = function() { checkAll('000List', false); };
+  b = $('btn000Refresh'); if (b) b.onclick = refresh000;
+  b = $('btn000CheckAll'); if (b) b.onclick = function() { checkAll('list000', true); };
+  b = $('btn000UncheckAll'); if (b) b.onclick = function() { checkAll('list000', false); };
   b = $('btn000Copy'); if (b) b.onclick = copy000Delivery;
 }
 
 // ==================== 检测 ====================
 async function refreshDetail() {
   if (sel < 0) return;
-  var kw = $('keywordInput').value || '项目归档资料';
+  try {
+    var kw = $('keywordInput').value || '项目归档资料';
   resolved = await api.get('/api/projects/' + sel + '/detect?keyword=' + encodeURIComponent(kw));
   var dl = $('detectLocal'), dn = $('detectNas'), ds = $('detectSummary');
   if (!resolved.relPath) { dl.textContent = '未找到含"' + kw + '"的子目录'; dn.textContent = ''; ds.textContent = ''; }
@@ -98,6 +99,7 @@ async function refreshDetail() {
     else if (resolved.localExists && resolved.nasExists) ds.innerHTML = '<span style="color:#22c55e">✓ 文件一致</span>';
   }
   refreshPending();
+  } catch(e) { var x = $('detectLocal'); if (x) x.textContent = '检测失败'; }
 }
 
 async function refreshPending() {
