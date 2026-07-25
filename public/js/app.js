@@ -9,6 +9,7 @@ var projects = [], settings = {}, sel = -1, resolved = null, scanResults = [];
 var nasDirModify = '', nasDir000 = '';
 var localDirModify = '', localDir000 = '';
 var batchSel = {};
+var collapsedGroups = {};
 
 window.onload = async function() {
   projects = await api.get('/api/projects');
@@ -37,9 +38,13 @@ async function batchSetStatus() {
   var status = $('batchStatus').value;
   var keys = Object.keys(batchSel).filter(function(k) { return batchSel[k]; });
   if (keys.length === 0) { alert('请先勾选项目'); return; }
-  for (var k = 0; k < keys.length; k++) await api.put('/api/projects/' + keys[k] + '/status', { status: status });
-  batchSel = {}; projects = await api.get('/api/projects'); renderProjectList();
-  if (sel >= 0 && sel < projects.length) selectProject(sel);
+  setStatus('正在更新 ' + keys.length + ' 个项目...');
+  try {
+    for (var k = 0; k < keys.length; k++) await api.put('/api/projects/' + keys[k] + '/status', { status: status });
+    setStatus('已更新 ' + keys.length + ' 个项目');
+    batchSel = {}; projects = await api.get('/api/projects'); renderProjectList();
+    if (sel >= 0 && sel < projects.length) selectProject(sel);
+  } catch(e) { setStatus('更新失败: ' + e.message); }
 }
 async function batchDelete() {
   var keys = Object.keys(batchSel).filter(function(k) { return batchSel[k]; });
@@ -64,7 +69,8 @@ function renderProjectList() {
   function group(label, indices) {
     var h = document.createElement('div'); h.className = 'cat-label';
     h.innerHTML = '<span class="arr">▼</span> ' + label + ' (' + indices.length + ')';
-    h.onclick = function() { this.classList.toggle('folded'); refresh(this); };
+    h.onclick = function() { this.classList.toggle('folded'); collapsedGroups[label] = this.classList.contains('folded'); refresh(this); };
+    if (collapsedGroups[label]) h.classList.add('folded');
     list.appendChild(h);
     for (var j = 0; j < indices.length; j++) {
       var idx = indices[j], p = projects[idx], s = p.status || 'editing';
@@ -102,8 +108,8 @@ function selectProject(idx) {
 }
 
 function bindEvents() {
-  var b = $('btnOpenLocal'); if (b) b.onclick = function() { if (resolved && resolved.localEpDir) api.post('/api/open-explorer', { path: resolved.localEpDir }); };
-  b = $('btnOpenNas'); if (b) b.onclick = function() { if (resolved && resolved.nasEpDir) api.post('/api/open-explorer', { path: resolved.nasEpDir }); };
+  var b = $('btnOpenLocal'); if (b) b.onclick = function() { var p = (resolved && resolved.localEpDir) || (projects[sel]||{}).localDir; if (p) api.post('/api/open-explorer', { path: p }); };
+  b = $('btnOpenNas'); if (b) b.onclick = function() { var p = (resolved && resolved.nasEpDir) || (projects[sel]||{}).nasDir; if (p) api.post('/api/open-explorer', { path: p }); };
   b = $('btnCopyPath'); if (b) b.onclick = function() { copyText((resolved && resolved.nasEpDir) || projects[sel].nasDir); };
   b = $('btnCopyMsg'); if (b) b.onclick = copyDeliveryMsg;
   b = $('btnRefresh'); if (b) b.onclick = refreshPending;
@@ -115,15 +121,15 @@ function bindEvents() {
   b = $('btnModUncheckAll'); if (b) b.onclick = function() { checkAll('modifyList', false); };
   b = $('btnModCopy'); if (b) b.onclick = copyModifyBatches;
   b = $('btnModCopyPath'); if (b) b.onclick = function() { copyCheckedPaths('modifyList', nasDirModify); };
-  b = $('btnModOpenLocal'); if (b) b.onclick = function() { api.post('/api/open-explorer', { path: localDirModify }); };
-  b = $('btnModOpenNas'); if (b) b.onclick = function() { api.post('/api/open-explorer', { path: nasDirModify }); };
+  b = $('btnModOpenLocal'); if (b) b.onclick = function() { openCheckedDir('modifyList', localDirModify); };
+  b = $('btnModOpenNas'); if (b) b.onclick = function() { openCheckedDir('modifyList', nasDirModify); };
   b = $('btn000Refresh'); if (b) b.onclick = refresh000;
   b = $('btn000CheckAll'); if (b) b.onclick = function() { checkAll('list000', true); };
   b = $('btn000UncheckAll'); if (b) b.onclick = function() { checkAll('list000', false); };
   b = $('btn000Copy'); if (b) b.onclick = copy000Delivery;
   b = $('btn000CopyPath'); if (b) b.onclick = function() { copyCheckedPaths('list000', nasDir000); };
-  b = $('btn000OpenLocal'); if (b) b.onclick = function() { api.post('/api/open-explorer', { path: localDir000 }); };
-  b = $('btn000OpenNas'); if (b) b.onclick = function() { api.post('/api/open-explorer', { path: nasDir000 }); };
+  b = $('btn000OpenLocal'); if (b) b.onclick = function() { openCheckedDir('list000', localDir000); };
+  b = $('btn000OpenNas'); if (b) b.onclick = function() { openCheckedDir('list000', nasDir000); };
 }
 
 // ==================== 异步日志逐条显示 ====================
@@ -346,6 +352,17 @@ function copyCheckedPaths(listId, baseDir) {
   if (paths.length === 0) paths.push(baseDir);
   copyText(paths.join('\n'));
 }
+function openCheckedDir(listId, baseDir) {
+  var cbs = document.querySelectorAll('#' + listId + ' input[type=checkbox]');
+  var dirs = [];
+  for (var i = 0; i < cbs.length; i++) if (cbs[i].checked) {
+    var name = cbs[i].nextElementSibling.textContent.split(' (')[0];
+    dirs.push(baseDir + '\\' + name);
+  }
+  if (dirs.length === 0 && baseDir) dirs.push(baseDir);
+  for (var d = 0; d < dirs.length; d++) api.post('/api/open-explorer', { path: dirs[d] });
+}
+
 function copyDeliveryMsg() {
   if (sel < 0) return;
   var path = (resolved && resolved.nasEpDir) || projects[sel].nasDir;
