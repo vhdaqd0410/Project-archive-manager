@@ -21,11 +21,11 @@ function $(id) { return document.getElementById(id); }
 function renderProjectList() {
   var list = $('projectList'), search = ($('searchInput').value || '').toLowerCase();
   list.innerHTML = '';
-  var active = [], done = [];
+  var editing = [], modifying = [], done = [];
   for (var i = 0; i < projects.length; i++) {
     var p = projects[i];
     if (search && p.name.toLowerCase().indexOf(search) < 0) continue;
-    (p.status === 'done' ? done : active).push(i);
+    (p.status === 'done' ? done.push(i) : p.status === 'modifying' ? modifying.push(i) : editing.push(i));
   }
   function group(label, indices) {
     var h = document.createElement('div'); h.className = 'cat-label';
@@ -33,17 +33,18 @@ function renderProjectList() {
     h.onclick = function() { this.classList.toggle('folded'); refresh(this); };
     list.appendChild(h);
     for (var j = 0; j < indices.length; j++) {
-      var idx = indices[j], p = projects[idx];
-      var d = document.createElement('div'); d.className = 'item' + (p.status === 'done' ? ' done' : '') + (idx === sel ? ' sel' : '');
-      d.textContent = p.name;
+      var idx = indices[j], p = projects[idx], s = p.status || 'editing';
+      var d = document.createElement('div'); d.className = 'item ' + s + (idx === sel ? ' sel' : '');
+      d.innerHTML = '<span class="dot"></span>' + esc(p.name);
       d.onclick = (function(i) { return function() { selectProject(i); }; })(idx);
       list.appendChild(d);
     }
     refresh(h);
   }
   function refresh(h) { var f = h.classList.contains('folded'), e = h.nextElementSibling; while (e && !e.classList.contains('cat-label')) { e.style.display = f ? 'none' : ''; e = e.nextElementSibling; } }
-  group('进行中', active);
-  group('已完成', done);
+  group('🔵 剪辑中', editing);
+  group('🟠 修改中', modifying);
+  group('✅ 已完成', done);
   $('projectCount').textContent = projects.length;
 }
 
@@ -87,6 +88,23 @@ function bindEvents() {
   b = $('btn000CopyPath'); if (b) b.onclick = function() { copyText(nasDir000); };
 }
 
+// ==================== 流式读取 ====================
+async function readStream(response) {
+  var reader = response.body.getReader(), decoder = new TextDecoder(), buf = '';
+  while (true) {
+    var r = await reader.read(); if (r.done) break;
+    buf += decoder.decode(r.value, { stream: true });
+    var lines = buf.split('\n'); buf = lines.pop();
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i]; if (!line.trim()) continue;
+      try { var d = JSON.parse(line);
+        if (d.done) return d; else addLog((d.success ? '✓' : '✗') + ' ' + (d.file || d.item || '?'));
+      } catch(e) {}
+    }
+  }
+  return {};
+}
+
 // ==================== 检测 ====================
 async function refreshDetail() {
   if (sel < 0) return;
@@ -124,14 +142,12 @@ async function copyPending() {
   var cbs = document.querySelectorAll('#pendingList input[type=checkbox]');
   var files = []; for (var i = 0; i < cbs.length; i++) if (cbs[i].checked) files.push(cbs[i].nextElementSibling.textContent);
   if (files.length === 0) { alert('请先勾选'); return; }
-  addLog('开始复制 ' + files.length + ' 个文件...');
-  var r = await api.post('/api/projects/' + sel + '/copy', { fileNames: files, keyword: $('keywordInput').value || '项目归档资料' });
-  if (r.results) for (var i = 0; i < r.results.length; i++) {
-    var x = r.results[i]; addLog((x.success ? '✓' : '✗') + ' ' + (x.file || files[i]||'?'));
-  }
-  addLog('完成：' + r.ok + ' 成功 / ' + (r.fail||0) + ' 失败');
-  if (r.nasDir) addLog('NAS: ' + r.nasDir);
-  setStatus('复制完成：成功 ' + r.ok + ' 个');
+  addLog('📤 开始复制 ' + files.length + ' 个文件...');
+  var resp = await fetch('/api/projects/' + sel + '/copy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fileNames: files, keyword: $('keywordInput').value || '项目归档资料' }) });
+  var d = await readStream(resp);
+  addLog('✅ 完成：' + (d.ok||0) + ' 成功 / ' + (d.fail||0) + ' 失败');
+  if (d.nasDir) addLog('📍 NAS: ' + d.nasDir);
+  setStatus('复制完成：成功 ' + (d.ok||0) + ' 个');
   refreshDetail();
 }
 
@@ -163,24 +179,23 @@ async function copyModifyBatches() {
   var cbs = document.querySelectorAll('#modifyList input[type=checkbox]');
   var names = []; for (var i = 0; i < cbs.length; i++) if (cbs[i].checked) names.push(cbs[i].nextElementSibling.textContent.split(' (')[0]);
   if (names.length === 0) { alert('请先勾选'); return; }
-  addLog('开始复制 ' + names.length + ' 个批次...');
-  var r = await api.post('/api/projects/' + sel + '/modify-copy-batch', { batchNames: names, keyword: '上映单集版' });
-  if (r.results) for (var i = 0; i < r.results.length; i++) {
-    var x = r.results[i]; addLog((x.success ? '✓' : '✗') + ' ' + x.name + (x.success ? ' (' + (x.count||0) + ' 文件)' : ''));
-  }
-  addLog('完成：' + r.ok + ' 成功 / ' + (r.fail||0) + ' 失败');
-  if (r.nasDir) addLog('NAS: ' + r.nasDir);
-  setStatus('完成：' + r.ok + ' 成功');
+  addLog('📤 开始复制 ' + names.length + ' 个批次...');
+  var resp = await fetch('/api/projects/' + sel + '/modify-copy-batch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ batchNames: names, keyword: '上映单集版' }) });
+  var d = await readStream(resp);
+  addLog('✅ 完成：' + (d.ok||0) + ' 成功 / ' + (d.fail||0) + ' 失败');
+  if (d.nasDir) addLog('📍 NAS: ' + d.nasDir);
+  setStatus('完成：' + (d.ok||0) + ' 成功');
   refreshModify();
 }
 
 // ==================== 弹窗：项目 ====================
 function showProjectDlg(editIdx) {
-  var p = editIdx >= 0 ? projects[editIdx] : { name: '', localDir: '', nasDir: '', status: 'active' };
+  var p = editIdx >= 0 ? projects[editIdx] : { name: '', localDir: '', nasDir: '', status: 'editing' };
   var h = '<div class="fg"><label>项目名称</label><input id="dlgName" value="' + escAttr(p.name) + '"></div>';
   h += '<div class="fg"><label>本地根目录（从资源管理器地址栏复制）</label><input id="dlgLocal" value="' + escAttr(p.localDir) + '"></div>';
   h += '<div class="fg"><label>NAS根目录（从地址栏复制）</label><input id="dlgNas" value="' + escAttr(p.nasDir) + '"></div>';
-  h += '<div class="fg"><label>状态</label><select id="dlgStatus"><option value="active"' + (p.status === 'active' ? ' selected' : '') + '>进行中</option><option value="done"' + (p.status === 'done' ? ' selected' : '') + '>已完成</option></select></div>';
+  var s = p.status || 'editing';
+  h += '<div class="fg"><label>状态</label><select id="dlgStatus"><option value="editing"' + (s==='editing'?' selected':'') + '>🔵 剪辑中</option><option value="modifying"' + (s==='modifying'?' selected':'') + '>🟠 修改中</option><option value="done"' + (s==='done'?' selected':'') + '>✅ 已完成</option></select></div>';
   h += '<div class="modal-btns"><button class="btn btn-primary" onclick="saveProject(' + editIdx + ')">保存</button><button class="btn btn-outline" onclick="closeModal()">取消</button></div>';
   $('modalTitle').textContent = editIdx >= 0 ? '编辑项目' : '新建项目';
   $('modalBody').innerHTML = h;
@@ -274,14 +289,12 @@ async function copy000Delivery() {
   var cbs = document.querySelectorAll('#list000 input[type=checkbox]');
   var names = []; for (var i = 0; i < cbs.length; i++) if (cbs[i].checked) names.push(cbs[i].nextElementSibling.textContent.split(' (')[0]);
   if (names.length === 0) { alert('请先勾选'); return; }
-  addLog('开始复制 ' + names.length + ' 个文件夹...');
-  var r = await api.post('/api/projects/' + sel + '/modify-copy-batch', { batchNames: names, keyword: '000交付' });
-  if (r.results) for (var i = 0; i < r.results.length; i++) {
-    var x = r.results[i]; addLog((x.success ? '✓' : '✗') + ' ' + x.name + (x.success ? ' (' + (x.count||0) + ' 文件)' : ''));
-  }
-  addLog('完成：' + r.ok + ' 成功 / ' + (r.fail||0) + ' 失败');
-  if (r.nasDir) addLog('NAS: ' + r.nasDir);
-  setStatus('完成：' + r.ok + ' 成功');
+  addLog('📤 开始复制 ' + names.length + ' 个文件夹...');
+  var resp = await fetch('/api/projects/' + sel + '/modify-copy-batch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ batchNames: names, keyword: '000交付' }) });
+  var d = await readStream(resp);
+  addLog('✅ 完成：' + (d.ok||0) + ' 成功 / ' + (d.fail||0) + ' 失败');
+  if (d.nasDir) addLog('📍 NAS: ' + d.nasDir);
+  setStatus('完成：' + (d.ok||0) + ' 成功');
   refresh000();
 }
 

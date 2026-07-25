@@ -12,7 +12,7 @@ let settings = { keyword: '项目归档资料', templates: [] };
 projectService.migrateOldData();
 projects = projectService.loadProjects();
 settings = projectService.loadSettings();
-projects.forEach(p => { if (!p.status) p.status = 'active'; });
+projects.forEach(p => { if (!p.status) p.status = 'editing'; });
 
 // ==================== 项目 CRUD ====================
 router.get('/projects', (req, res) => res.json(projects));
@@ -20,7 +20,7 @@ router.get('/projects', (req, res) => res.json(projects));
 router.post('/projects', (req, res) => {
   const { name, localDir, nasDir } = req.body;
   if (!name || !name.trim()) return res.status(400).json({ error: '项目名称不能为空' });
-  const p = { name: name.trim(), localDir: (localDir||'').trim(), nasDir: (nasDir||'').trim(), status: 'active' };
+  const p = { name: name.trim(), localDir: (localDir||'').trim(), nasDir: (nasDir||'').trim(), status: 'editing' };
   projects.push(p); projectService.saveProjects(projects);
   res.json({ success: true, index: projects.length - 1, project: p });
 });
@@ -39,7 +39,7 @@ router.put('/projects/:index/status', (req, res) => {
   const idx = parseInt(req.params.index);
   if (isNaN(idx) || idx < 0 || idx >= projects.length) return res.status(400).json({ error: '无效索引' });
   const { status } = req.body;
-  if (!['active', 'done'].includes(status)) return res.status(400).json({ error: '无效状态' });
+  if (!['editing', 'modifying', 'done'].includes(status)) return res.status(400).json({ error: '无效状态' });
   projects[idx].status = status; projectService.saveProjects(projects);
   res.json({ success: true });
 });
@@ -77,9 +77,15 @@ router.post('/projects/:index/copy', (req, res) => {
   if (!r.relPath) return res.status(400).json({ error: '未检测到关键词目录' });
   if (!r.localExists) return res.status(400).json({ error: '本地不存在' });
   if (!fs.existsSync(r.nasEpDir)) fs.mkdirSync(r.nasEpDir, { recursive: true });
-  const results = fileService.copyFilesToNas(r.localEpDir, r.nasEpDir, fileNames);
-  const ok = results.filter(r => r.success).length;
-  res.json({ success: true, ok, fail: results.length - ok, results, nasDir: r.nasEpDir });
+  res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Transfer-Encoding': 'chunked' });
+  let ok = 0, fail = 0;
+  for (const f of (Array.isArray(fileNames) ? fileNames : [])) {
+    try {
+      fs.copyFileSync(path.join(r.localEpDir, f), path.join(r.nasEpDir, f));
+      ok++; res.write(JSON.stringify({ file: f, success: true }) + '\n');
+    } catch(e) { fail++; res.write(JSON.stringify({ file: f, success: false }) + '\n'); }
+  }
+  res.end(JSON.stringify({ done: true, ok, fail, nasDir: r.nasEpDir }) + '\n');
 });
 
 // ==================== 设置 ====================
@@ -117,7 +123,7 @@ router.post('/import/batch', (req, res) => {
   for (const item of items) {
     if (!item.name || !item.localDir) continue;
     if (projects.some(p => p.name === item.name)) continue;
-    const p = { name: item.name.trim(), localDir: item.localDir.trim(), nasDir: (item.nasDir||'').trim(), status: 'active' };
+    const p = { name: item.name.trim(), localDir: item.localDir.trim(), nasDir: (item.nasDir||'').trim(), status: 'editing' };
     projects.push(p); added.push(p);
   }
   projectService.saveProjects(projects);
@@ -162,15 +168,15 @@ router.post('/projects/:index/modify-copy-batch', (req, res) => {
   const lk = path.join(p.localDir, rel);
   const nk = path.join(p.nasDir, rel);
   if (!fs.existsSync(nk)) fs.mkdirSync(nk, { recursive: true });
-  const results = [];
+  res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Transfer-Encoding': 'chunked' });
   let ok = 0, fail = 0;
   for (const name of batchNames) {
     try {
       fileService.copyDirRecursive(path.join(lk, name), path.join(nk, name));
-      ok++; results.push({ name, success: true, count: countFiles(path.join(nk, name)) });
-    } catch { fail++; results.push({ name, success: false }); }
+      ok++; res.write(JSON.stringify({ item: name, success: true }) + '\n');
+    } catch { fail++; res.write(JSON.stringify({ item: name, success: false }) + '\n'); }
   }
-  res.json({ success: true, ok, fail, results, nasDir: nk });
+  res.end(JSON.stringify({ done: true, ok, fail, nasDir: nk }) + '\n');
 });
 
 // 递归复制
