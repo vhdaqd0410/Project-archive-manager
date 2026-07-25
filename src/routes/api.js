@@ -104,11 +104,19 @@ router.post('/open-explorer', (req, res) => {
 });
 
 router.post('/pick-folder', (req, res) => {
-  const { execSync } = require('child_process');
+  const { execSync, execFileSync } = require('child_process');
+  const path = require('path');
+  const fs = require('fs');
   try {
-    const result = execSync('powershell -NoProfile -Command "Add-Type -AssemblyName System.Windows.Forms; $f=New-Object System.Windows.Forms.FolderBrowserDialog; if($f.ShowDialog() -eq \"OK\"){$f.SelectedPath}"', { encoding: 'utf8', timeout: 30000 }).trim();
+    const tmpFile = path.join(require('os').tmpdir(), 'pam_pickfolder_' + Date.now() + '.vbs');
+    fs.writeFileSync(tmpFile,
+      'Set o=CreateObject("Shell.Application")\n' +
+      'Set f=o.BrowseForFolder(0,"选择文件夹",0)\n' +
+      'If Not f Is Nothing Then WScript.Echo f.Self.Path\n', 'utf8');
+    const result = execSync('cscript //NoLogo "' + tmpFile + '"', { encoding: 'utf8', timeout: 120000 }).trim();
+    try { fs.unlinkSync(tmpFile); } catch(e) {}
     res.json({ success: true, path: result || '' });
-  } catch(e) { res.json({ success: false, path: '' }); }
+  } catch(e) { res.json({ success: false, path: '', error: e.message }); }
 });
 
 // ==================== 批量导入 ====================
