@@ -207,7 +207,8 @@ async function refreshModify() {
     }
     mc.textContent = nc + ' 待交付';
     ms.innerHTML = nc > 0 ? '<span style="color:#f59e0b">' + nc + ' 个批次待交付</span>' : '<span style="color:#22c55e">全部已交付</span>';
-    nasDirModify = data.nasKwDir || "; localDirModify = data.localKwDir || ";
+    nasDirModify = data.nasKwDir || '';
+    localDirModify = data.localKwDir || '';
   } catch(e) { ($('modifyInfo')||{}).textContent = '检测失败: ' + e.message; }
 }
 
@@ -317,7 +318,8 @@ async function refresh000() {
   }
   mc.textContent = nc + ' 待交付';
   ms.innerHTML = nc > 0 ? '<span style="color:#f59e0b">' + nc + ' 个文件夹待交付</span>' : '<span style="color:#22c55e">全部已交付</span>';
-    nasDir000 = data.nasKwDir || "; localDir000 = data.localKwDir || ";
+    nasDir000 = data.nasKwDir || '';
+    localDir000 = data.localKwDir || '';
   } catch(e) { ($('info000')||{}).textContent = '检测失败: ' + e.message; }
 }
 
