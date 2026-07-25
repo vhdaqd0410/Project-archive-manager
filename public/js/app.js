@@ -127,22 +127,24 @@ async function copyPending() {
 // ==================== 修改交付 ====================
 async function refreshModify() {
   if (sel < 0) return;
-  var data = await api.get('/api/projects/' + sel + '/modify-batches?keyword=' + encodeURIComponent('上映单集版'));
-  var mi = $('modifyInfo'), ms = $('modifySummary'), ml = $('modifyList'), mc = $('modifyCount');
-  if (!mi) return;
-  if (!data.found) { mi.textContent = '未找到"上映单集版"目录'; return; }
-  mi.textContent = '本地: ' + data.localKwDir + '\nNAS: ' + data.nasKwDir;
-  var batches = data.batches || [], nc = 0;
-  ml.innerHTML = '';
-  for (var i = 0; i < batches.length; i++) {
-    var b = batches[i];
-    var d = document.createElement('div'); d.className = 'pi';
-    d.innerHTML = '<input type="checkbox" ' + (b.nasExists ? '' : 'checked') + '><span>' + esc(b.name) + ' (' + b.localFileCount + '个) ' + (b.nasExists ? '[已交付]' : '[待交付]') + '</span>';
-    ml.appendChild(d);
-    if (!b.nasExists) nc++;
-  }
-  mc.textContent = nc + ' 待交付';
-  ms.innerHTML = nc > 0 ? '<span style="color:#f59e0b">' + nc + ' 个批次待交付</span>' : '<span style="color:#22c55e">全部已交付</span>';
+  try {
+    var data = await api.get('/api/projects/' + sel + '/modify-batches?keyword=' + encodeURIComponent('上映单集版'));
+    var mi = $('modifyInfo'), ms = $('modifySummary'), ml = $('modifyList'), mc = $('modifyCount');
+    if (!mi) return;
+    if (!data.found) { mi.textContent = '未找到"上映单集版"目录'; return; }
+    mi.textContent = '本地: ' + data.localKwDir + '\nNAS: ' + data.nasKwDir;
+    var batches = data.batches || [], nc = 0;
+    ml.innerHTML = '';
+    for (var i = 0; i < batches.length; i++) {
+      var b = batches[i];
+      var d = document.createElement('div'); d.className = 'pi';
+      d.innerHTML = '<input type="checkbox" ' + (b.nasExists ? '' : 'checked') + '><span>' + esc(b.name) + ' (' + b.localFileCount + '个) ' + (b.nasExists ? '[已交付]' : '[待交付]') + '</span>';
+      ml.appendChild(d);
+      if (!b.nasExists) nc++;
+    }
+    mc.textContent = nc + ' 待交付';
+    ms.innerHTML = nc > 0 ? '<span style="color:#f59e0b">' + nc + ' 个批次待交付</span>' : '<span style="color:#22c55e">全部已交付</span>';
+  } catch(e) { ($('modifyInfo')||{}).textContent = '检测失败: ' + e.message; }
 }
 
 async function copyModifyBatches() {
@@ -230,7 +232,8 @@ async function doImport() {
 // ==================== 000交付 ====================
 async function refresh000() {
   if (sel < 0) return;
-  var data = await api.get('/api/projects/' + sel + '/modify-batches?keyword=' + encodeURIComponent('000交付'));
+  try {
+    var data = await api.get('/api/projects/' + sel + '/modify-batches?keyword=' + encodeURIComponent('000交付'));
   var mi = $('info000'), ms = $('summary000'), ml = $('list000'), mc = $('count000');
   if (!mi) return;
   if (!data.found) { mi.textContent = '未找到"000交付"目录'; return; }
@@ -246,6 +249,7 @@ async function refresh000() {
   }
   mc.textContent = nc + ' 待交付';
   ms.innerHTML = nc > 0 ? '<span style="color:#f59e0b">' + nc + ' 个文件夹待交付</span>' : '<span style="color:#22c55e">全部已交付</span>';
+  } catch(e) { ($('info000')||{}).textContent = '检测失败: ' + e.message; }
 }
 
 async function copy000Delivery() {
