@@ -10,6 +10,7 @@ var nasDirModify = '', nasDir000 = '';
 var localDirModify = '', localDir000 = '';
 var batchSel = {};
 var collapsedGroups = {};
+var checkedModify = {}, checked000 = {};
 
 window.onload = async function() {
   projects = await api.get('/api/projects');
@@ -201,7 +202,8 @@ async function refreshModify() {
     for (var i = 0; i < batches.length; i++) {
       var b = batches[i];
       var d = document.createElement('div'); d.className = 'pi';
-      d.innerHTML = '<input type="checkbox" ' + (b.nasExists ? '' : 'checked') + '><span>' + esc(b.name) + ' (' + b.localFileCount + '个) ' + (b.nasExists ? '[已交付]' : '[待交付]') + '</span>';
+      var chk = checkedModify[b.name] ? true : !b.nasExists;
+      d.innerHTML = '<input type="checkbox" ' + (chk ? 'checked' : '') + '><span>' + esc(b.name) + ' (' + b.localFileCount + '个) ' + (b.nasExists ? '[已交付]' : '[待交付]') + '</span>';
       ml.appendChild(d);
       if (!b.nasExists) nc++;
     }
@@ -216,11 +218,17 @@ async function copyModifyBatches() {
   var cbs = document.querySelectorAll('#modifyList input[type=checkbox]');
   var names = []; for (var i = 0; i < cbs.length; i++) if (cbs[i].checked) names.push(cbs[i].nextElementSibling.textContent.split(' (')[0]);
   if (names.length === 0) { alert('请先勾选'); return; }
+  // 记住勾选状态
+  for (var i = 0; i < names.length; i++) checkedModify[names[i]] = true;
   addLog('📤 开始复制 ' + names.length + ' 个批次...');
   var r = await api.post('/api/projects/' + sel + '/modify-copy-batch', { batchNames: names, keyword: '上映单集版' });
-  if (r.results) await logResults(r.results, '');
+  if (r.results) {
+    for (var i = 0; i < r.results.length; i++) {
+      var x = r.results[i]; var fullPath = (r.nasDir || nasDirModify) + '\\' + (x.item || x.name);
+      addLog((x.success ? '✓' : '✗') + ' ' + (x.item || x.name) + (x.success ? ' → ' + fullPath : ''));
+    }
+  }
   addLog('✅ 完成：' + (r.ok||0) + ' 成功 / ' + (r.fail||0) + ' 失败');
-  if (r.nasDir) addLog('📍 NAS: ' + r.nasDir);
   setStatus('完成：' + (r.ok||0) + ' 成功');
   refreshModify();
 }
@@ -312,7 +320,8 @@ async function refresh000() {
   for (var i = 0; i < batches.length; i++) {
     var b = batches[i];
     var d = document.createElement('div'); d.className = 'pi';
-    d.innerHTML = '<input type="checkbox" ' + (b.nasExists ? '' : 'checked') + '><span>' + esc(b.name) + ' (' + b.localFileCount + '个) ' + (b.nasExists ? '[已交付]' : '[待交付]') + '</span>';
+    var chk = checked000[b.name] ? true : !b.nasExists;
+    d.innerHTML = '<input type="checkbox" ' + (chk ? 'checked' : '') + '><span>' + esc(b.name) + ' (' + b.localFileCount + '个) ' + (b.nasExists ? '[已交付]' : '[待交付]') + '</span>';
     ml.appendChild(d);
     if (!b.nasExists) nc++;
   }
@@ -327,11 +336,16 @@ async function copy000Delivery() {
   var cbs = document.querySelectorAll('#list000 input[type=checkbox]');
   var names = []; for (var i = 0; i < cbs.length; i++) if (cbs[i].checked) names.push(cbs[i].nextElementSibling.textContent.split(' (')[0]);
   if (names.length === 0) { alert('请先勾选'); return; }
+  for (var i = 0; i < names.length; i++) checked000[names[i]] = true;
   addLog('📤 开始复制 ' + names.length + ' 个文件夹...');
   var r = await api.post('/api/projects/' + sel + '/modify-copy-batch', { batchNames: names, keyword: '000交付' });
-  if (r.results) await logResults(r.results, '');
+  if (r.results) {
+    for (var i = 0; i < r.results.length; i++) {
+      var x = r.results[i]; var fullPath = (r.nasDir || nasDir000) + '\\' + (x.item || x.name);
+      addLog((x.success ? '✓' : '✗') + ' ' + (x.item || x.name) + (x.success ? ' → ' + fullPath : ''));
+    }
+  }
   addLog('✅ 完成：' + (r.ok||0) + ' 成功 / ' + (r.fail||0) + ' 失败');
-  if (r.nasDir) addLog('📍 NAS: ' + r.nasDir);
   setStatus('完成：' + (r.ok||0) + ' 成功');
   refresh000();
 }
