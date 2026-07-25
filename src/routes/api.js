@@ -103,6 +103,14 @@ router.post('/open-explorer', (req, res) => {
   res.json({ success: true });
 });
 
+router.post('/pick-folder', (req, res) => {
+  const { execSync } = require('child_process');
+  try {
+    const result = execSync('powershell -NoProfile -Command "Add-Type -AssemblyName System.Windows.Forms; $f=New-Object System.Windows.Forms.FolderBrowserDialog; if($f.ShowDialog() -eq \"OK\"){$f.SelectedPath}"', { encoding: 'utf8', timeout: 30000 }).trim();
+    res.json({ success: true, path: result || '' });
+  } catch(e) { res.json({ success: false, path: '' }); }
+});
+
 // ==================== 批量导入 ====================
 router.post('/import/scan', (req, res) => {
   const result = importService.scanLocalRoot(req.body.localRoot, projects.map(p => p.name));

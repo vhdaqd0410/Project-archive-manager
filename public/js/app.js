@@ -239,8 +239,8 @@ async function copyModifyBatches() {
 function showProjectDlg(editIdx) {
   var p = editIdx >= 0 ? projects[editIdx] : { name: '', localDir: '', nasDir: '', status: 'editing' };
   var h = '<div class="fg"><label>项目名称</label><input id="dlgName" value="' + escAttr(p.name) + '"></div>';
-  h += '<div class="fg"><label>本地根目录（从资源管理器地址栏复制）</label><input id="dlgLocal" value="' + escAttr(p.localDir) + '"></div>';
-  h += '<div class="fg"><label>NAS根目录（从地址栏复制）</label><input id="dlgNas" value="' + escAttr(p.nasDir) + '"></div>';
+  h += '<div class="fg"><label>本地根目录</label><div class="ir"><input id="dlgLocal" value="' + escAttr(p.localDir) + '"><button class="btn btn-sm btn-outline" onclick="pickFolder(\'dlgLocal\')">浏览</button></div></div>';
+  h += '<div class="fg"><label>NAS根目录</label><div class="ir"><input id="dlgNas" value="' + escAttr(p.nasDir) + '"><button class="btn btn-sm btn-outline" onclick="pickFolder(\'dlgNas\')">浏览</button></div></div>';
   var s = p.status || 'editing';
   h += '<div class="fg"><label>状态</label><select id="dlgStatus"><option value="editing"' + (s==='editing'?' selected':'') + '>🔵 剪辑中</option><option value="modifying"' + (s==='modifying'?' selected':'') + '>🟠 修改中</option><option value="done"' + (s==='done'?' selected':'') + '>✅ 已完成</option></select></div>';
   h += '<div class="modal-btns"><button class="btn btn-primary" onclick="saveProject(' + editIdx + ')">保存</button><button class="btn btn-outline" onclick="closeModal()">取消</button></div>';
@@ -347,7 +347,8 @@ async function copy000Delivery() {
     setStatus('复制中：' + (i + 1) + '/' + names.length);
   }
   addLog('✅ 完成：' + ok + ' 成功 / ' + fail + ' 失败');
-  setStatus('完成：' + (r.ok||0) + ' 成功');
+  if (ok > 0) { await api.put('/api/projects/' + sel + '/status', { status: 'done' }); addLog('📌 项目状态已更新为「已完成」'); }
+  setStatus('完成：' + ok + ' 成功');
   refresh000();
 }
 
@@ -359,6 +360,10 @@ function esc(s) { var d = document.createElement('div'); d.textContent = s || ''
 function escAttr(s) { return (s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function checkAll(listId, checked) { var cbs = document.querySelectorAll('#' + listId + ' input[type=checkbox]'); for (var i = 0; i < cbs.length; i++) cbs[i].checked = checked; }
 function copyText(text) { navigator.clipboard.writeText(text).catch(function() {}); setStatus('已复制'); }
+async function pickFolder(inputId) {
+  var r = await api.post('/api/pick-folder', {});
+  if (r.success && r.path) { $('dlg' + inputId.replace('dlg','')) || $(inputId); var el = $(inputId); if (el) el.value = r.path; }
+}
 function copyCheckedPaths(listId, baseDir) {
   var cbs = document.querySelectorAll('#' + listId + ' input[type=checkbox]');
   var paths = [];
