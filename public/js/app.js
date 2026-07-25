@@ -1,696 +1,239 @@
-// ==================== API 工具 ====================
-const api = {
-  async get(url) { const r = await fetch(url); return r.json(); },
-  async post(url, data) {
-    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
-    return r.json();
-  },
-  async put(url, data) {
-    const r = await fetch(url, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
-    return r.json();
-  },
-  async del(url) {
-    const r = await fetch(url, { method: 'DELETE' });
-    return r.json();
-  }
+var api = {
+  get: async u => (await fetch(u)).json(),
+  post: async (u, d) => (await fetch(u, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(d) })).json(),
+  put: async (u, d) => (await fetch(u, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(d) })).json(),
+  del: async u => (await fetch(u, { method: 'DELETE' })).json()
 };
 
-// ==================== 状态 ====================
-const state = {
-  projects: [],
-  selectedIndex: -1,
-  settings: { keyword: '项目归档资料', templates: [] },
-  currentResolved: null,     // 当前选中项目的 resolveEpisodeDirs 结果
-  editingProject: null,       // 编辑模式：-1=新建, >=0=编辑该项目
-  importCandidates: [],       // 批量导入候选列表
-  importTemplates: []         // 批量导入弹窗中的模板快照
-};
+var projects = [], settings = {}, sel = -1, resolved = null, scanResults = [];
 
-// ==================== DOM 引用 ====================
-const $ = id => document.getElementById(id);
-const el = {
-  projectList: $('projectList'),
-  projectCount: $('projectCount'),
-  editProjectBtn: $('editProjectBtn'),
-  deleteProjectBtn: $('deleteProjectBtn'),
-  keywordInput: $('keywordInput'),
-  emptyState: $('emptyState'),
-  detailContent: $('detailContent'),
-  infoLocalDir: $('infoLocalDir'),
-  infoNasDir: $('infoNasDir'),
-  detectLocal: $('detectLocal'),
-  detectNas: $('detectNas'),
-  detectSummary: $('detectSummary'),
-  pendingList: $('pendingList'),
-  pendingCount: $('pendingCount'),
-  statusText: $('statusText'),
-  // 弹窗
-  projectModal: $('projectModal'),
-  modalTitle: $('modalTitle'),
-  formName: $('formName'),
-  formLocalDir: $('formLocalDir'),
-  formNasDir: $('formNasDir'),
-  formStatus: $('formStatus'),
-  importModal: $('importModal'),
-  importLocalRoot: $('importLocalRoot'),
-  templateList: $('templateList'),
-  scanSummary: $('scanSummary'),
-  candidateList: $('candidateList'),
-  batchOpsBar: $('batchOpsBar'),
-  batchTemplateSelect: $('batchTemplateSelect'),
-  // 搜索
-  projectSearch: $('projectSearch'),
-  // 修改交付
-  modifyDetect: $('modifyDetect'),
-  modifySummary: $('modifySummary'),
-  modifyList: $('modifyList'),
-  modifyCount: $('modifyCount')
-};
-
-// ==================== 初始化 ====================
-async function init() {
-  await loadProjects();
-  await loadSettings();
-  bindEvents();
-  bindLogPanel();
-}
-
-async function loadProjects() {
-  state.projects = await api.get('/api/projects');
+window.onload = async function() {
+  projects = await api.get('/api/projects');
+  settings = await api.get('/api/settings');
+  document.getElementById('keywordInput').value = settings.keyword || '项目归档资料';
   renderProjectList();
-}
+};
 
-async function loadSettings() {
-  state.settings = await api.get('/api/settings');
-  el.keywordInput.value = state.settings.keyword || '项目归档资料';
-}
+function $(id) { return document.getElementById(id); }
 
-// ==================== 项目列表渲染 ====================
+// ==================== 项目列表 ====================
 function renderProjectList() {
-  const searchTerm = (el.projectSearch.value || '').trim().toLowerCase();
-  el.projectList.innerHTML = '';
-
-  const activeProjects = [];
-  const doneProjects = [];
-  state.projects.forEach((p, i) => {
-    if (searchTerm && !p.name.toLowerCase().includes(searchTerm)) return;
-    (p.status === 'done' ? doneProjects : activeProjects).push({ ...p, i });
-  });
-
-  const renderGroup = (label, items, emptyText) => {
-    if (items.length === 0) {
-      if (emptyText) {
-        const grp = document.createElement('div');
-        grp.className = 'cat-group';
-        grp.innerHTML = `<div class="cat-label" style="cursor:default"><span class="cat-arrow">▼</span> ${label} (0)</div>`;
-        grp.innerHTML += `<div style="padding:4px 16px;font-size:11px;color:#64748b">${emptyText}</div>`;
-        el.projectList.appendChild(grp);
-      }
-      return;
+  var list = $('projectList'), search = ($('searchInput').value || '').toLowerCase();
+  list.innerHTML = '';
+  var active = [], done = [];
+  for (var i = 0; i < projects.length; i++) {
+    var p = projects[i];
+    if (search && p.name.toLowerCase().indexOf(search) < 0) continue;
+    (p.status === 'done' ? done : active).push(i);
+  }
+  function group(label, indices) {
+    var h = document.createElement('div'); h.className = 'cat-label';
+    h.innerHTML = '<span class="arr">▼</span> ' + label + ' (' + indices.length + ')';
+    h.onclick = function() { this.classList.toggle('folded'); refresh(this); };
+    list.appendChild(h);
+    for (var j = 0; j < indices.length; j++) {
+      var idx = indices[j], p = projects[idx];
+      var d = document.createElement('div'); d.className = 'item' + (p.status === 'done' ? ' done' : '') + (idx === sel ? ' sel' : '');
+      d.textContent = p.name;
+      d.onclick = (function(i) { return function() { selectProject(i); }; })(idx);
+      list.appendChild(d);
     }
-    const grp = document.createElement('div');
-    grp.className = 'cat-group';
-    const hdr = document.createElement('div');
-    hdr.className = 'cat-label';
-    hdr.innerHTML = `<span class="cat-arrow">▼</span> ${label} (${items.length})`;
-    hdr.onclick = () => {
-      hdr.classList.toggle('collapsed');
-      grp.querySelectorAll('li').forEach(li => li.style.display = hdr.classList.contains('collapsed') ? 'none' : '');
-    };
-    grp.appendChild(hdr);
-
-    items.forEach(p => {
-      const li = document.createElement('li');
-      if (p.status === 'done') li.classList.add('done-item');
-      li.textContent = p.name;
-      if (p.i === state.selectedIndex) li.classList.add('active');
-      li.addEventListener('click', () => selectProject(p.i));
-      grp.appendChild(li);
-    });
-    el.projectList.appendChild(grp);
-  };
-
-  renderGroup('🟢 进行中', activeProjects, '暂无进行中的项目');
-  renderGroup('✅ 已完成', doneProjects, '暂无已完成的项目（点击项目旁蓝色圆点标记为完成）');
-
-  el.projectCount.textContent = state.projects.length;
-  el.editProjectBtn.disabled = state.selectedIndex < 0;
-  el.deleteProjectBtn.disabled = state.selectedIndex < 0;
+    refresh(h);
+  }
+  function refresh(h) { var f = h.classList.contains('folded'), e = h.nextElementSibling; while (e && !e.classList.contains('cat-label')) { e.style.display = f ? 'none' : ''; e = e.nextElementSibling; } }
+  group('进行中', active);
+  group('已完成', done);
+  $('projectCount').textContent = projects.length;
 }
 
-function selectProject(index) {
-  state.selectedIndex = index;
-  state.currentResolved = null;
-  renderProjectList();
-  if (index < 0) {
-    el.emptyState.style.display = '';
-    el.detailContent.style.display = 'none';
-    return;
-  }
-  el.emptyState.style.display = 'none';
-  el.detailContent.style.display = '';
+function selectProject(idx) {
+  sel = idx; resolved = null; renderProjectList();
+  var rp = $('rightPanel');
+  if (idx < 0) { rp.innerHTML = '<div class="empty">请从左侧选择项目，或新建项目</div>'; return; }
+  var p = projects[idx];
+  rp.innerHTML =
+    '<div class="card"><div class="card-hdr">📂 项目目录</div><div class="card-body"><div class="info-row"><span class="lbl">本地</span><span class="val" id="infoLocalDir">' + esc(p.localDir||'-') + '</span></div><div class="info-row"><span class="lbl">NAS</span><span class="val" id="infoNasDir">' + esc(p.nasDir||'-') + '</span></div></div></div>' +
+    '<div class="card"><div class="card-hdr">🔍 关键词目录检测</div><div class="card-body"><div id="detectLocal" style="font-size:12px;color:#94a3b8">扫描中...</div><div id="detectNas" style="font-size:12px;color:#94a3b8">扫描中...</div><div id="detectSummary" style="font-size:12px;margin-top:4px"></div></div></div>' +
+    '<div class="act-bar"><button class="btn btn-primary" id="btnOpenLocal">打开本地</button><button class="btn btn-primary" id="btnOpenNas">打开NAS</button><button class="btn btn-outline" id="btnCopyPath">复制NAS路径</button><button class="btn btn-outline" id="btnCopyMsg">复制交付信息</button></div>' +
+    '<div class="card"><div class="card-hdr">⚠ 待交付文件 <span id="pendingCount" style="margin-left:8px">0</span></div><div class="card-body"><div class="pending-list" id="pendingList"></div><div class="act-bar"><button class="btn btn-sm btn-outline" id="btnRefresh">刷新</button><button class="btn btn-sm btn-outline" id="btnCheckAll">全选</button><button class="btn btn-sm btn-outline" id="btnUncheckAll">取消全选</button><button class="btn btn-sm btn-warn" id="btnCopy">复制选中到NAS</button></div></div></div>' +
+    '<div class="card"><div class="card-hdr">🎬 上映单集版 · 修改交付 <span id="modifyCount" style="margin-left:8px">0</span></div><div class="card-body"><div id="modifyInfo" style="font-size:11px;color:#94a3b8">检测中...</div><div id="modifySummary" style="font-size:12px;margin:4px 0"></div><div class="pending-list" id="modifyList"></div><div class="act-bar"><button class="btn btn-sm btn-outline" id="btnModRefresh">刷新</button><button class="btn btn-sm btn-outline" id="btnModCheckAll">全选</button><button class="btn btn-sm btn-outline" id="btnModUncheckAll">取消全选</button><button class="btn btn-sm btn-warn" id="btnModCopy">复制选中到NAS</button></div></div></div>';
+  bindEvents();
   refreshDetail();
   refreshModify();
 }
 
-// ==================== 详情面板刷新 ====================
-async function refreshDetail() {
-  if (state.selectedIndex < 0) return;
-  const p = state.projects[state.selectedIndex];
-  el.infoLocalDir.textContent = p.localDir || '(未设置)';
-  el.infoLocalDir.title = p.localDir || '';
-  el.infoNasDir.textContent = p.nasDir || '(未设置)';
-  el.infoNasDir.title = p.nasDir || '';
-
-  // 检测关键词目录
-  el.detectLocal.textContent = '扫描中...';
-  el.detectNas.textContent = '扫描中...';
-  el.detectSummary.textContent = '';
-  el.detectSummary.className = 'detect-summary';
-  el.pendingList.innerHTML = '';
-  el.pendingCount.textContent = '0';
-
-  const keyword = el.keywordInput.value.trim() || '项目归档资料';
-  const resolved = await api.get(`/api/projects/${state.selectedIndex}/detect?keyword=${encodeURIComponent(keyword)}`);
-  state.currentResolved = resolved;
-
-  if (!resolved.relPath) {
-    el.detectLocal.textContent = `未找到含"${keyword}"的子目录`;
-    el.detectNas.textContent = `未找到含"${keyword}"的子目录`;
-  } else {
-    el.detectLocal.textContent = resolved.localEpDir + (resolved.localExists ? `  [${resolved.localCount} 个文件]` : '  [无法访问/不存在]');
-    el.detectLocal.style.color = resolved.localExists ? '#16a34a' : '#dc2626';
-    el.detectNas.textContent = resolved.nasEpDir + (resolved.nasExists ? `  [${resolved.nasCount} 个文件]` : '  [无法访问/不存在]');
-    el.detectNas.style.color = resolved.nasExists ? '#16a34a' : '#94a3b8';
-
-    const diff = resolved.localCount - resolved.nasCount;
-    if (diff > 0) {
-      el.detectSummary.textContent = `本地比 NAS 多 ${diff} 个文件，需要交付`;
-      el.detectSummary.className = 'detect-summary warn';
-    } else if (resolved.localExists && resolved.nasExists) {
-      el.detectSummary.textContent = '本地与 NAS 文件一致';
-      el.detectSummary.className = 'detect-summary ok';
-    }
-  }
-
-  // 待交付文件
-  if (resolved.relPath && resolved.localExists) {
-    const pending = await api.get(`/api/projects/${state.selectedIndex}/pending?keyword=${encodeURIComponent(keyword)}`);
-    renderPendingList(pending.files || []);
-  }
-}
-
-function renderPendingList(files) {
-  el.pendingList.innerHTML = '';
-  el.pendingCount.textContent = files.length;
-  if (files.length === 0) {
-    el.pendingList.innerHTML = '<div class="pending-empty">✅ 没有待交付文件</div>';
-    return;
-  }
-  files.forEach(name => {
-    const div = document.createElement('div');
-    div.className = 'pending-item';
-    div.innerHTML = `<input type="checkbox" checked><span class="pending-name">${escHtml(name)}</span>`;
-    el.pendingList.appendChild(div);
-  });
-}
-
-function getCheckedPendingFiles() {
-  const checks = el.pendingList.querySelectorAll('input[type="checkbox"]');
-  const names = [];
-  checks.forEach(cb => { if (cb.checked) { const nameEl = cb.parentElement.querySelector('.pending-name'); if (nameEl) names.push(nameEl.textContent); } });
-  return names;
-}
-
-function setAllPendingChecked(checked) {
-  el.pendingList.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = checked; });
-}
-
-// ==================== 事件绑定 ====================
 function bindEvents() {
-  // 关键字
-  $('applyKeywordBtn').addEventListener('click', async () => {
-    const kw = el.keywordInput.value.trim() || '项目归档资料';
-    state.settings.keyword = kw;
-    await api.put('/api/settings', { keyword: kw });
-    refreshDetail();
-  });
-
-  // 项目操作
-  $('addProjectBtn').addEventListener('click', () => openProjectModal(-1));
-  $('editProjectBtn').addEventListener('click', () => {
-    if (state.selectedIndex >= 0) openProjectModal(state.selectedIndex);
-  });
-  $('deleteProjectBtn').addEventListener('click', async () => {
-    if (state.selectedIndex < 0) return;
-    const p = state.projects[state.selectedIndex];
-    if (!confirm(`确定删除项目「${p.name}」？（不会删除实际文件）`)) return;
-    await api.del(`/api/projects/${state.selectedIndex}`);
-    await loadProjects();
-    if (state.selectedIndex >= state.projects.length) state.selectedIndex = state.projects.length - 1;
-    if (state.selectedIndex >= 0) selectProject(state.selectedIndex);
-    else { el.emptyState.style.display = ''; el.detailContent.style.display = 'none'; }
-    renderProjectList();
-  });
-  $('batchImportBtn').addEventListener('click', () => openImportModal());
-
-  // 操作按钮
-  $('openLocalBtn').addEventListener('click', async () => {
-    const p = getSelectedProject(); if (!p) return;
-    const path = (state.currentResolved && state.currentResolved.localEpDir) || p.localDir;
-    await api.post('/api/open-explorer', { path });
-  });
-  $('openNasBtn').addEventListener('click', async () => {
-    const p = getSelectedProject(); if (!p) return;
-    const path = (state.currentResolved && state.currentResolved.nasEpDir) || p.nasDir;
-    await api.post('/api/open-explorer', { path });
-  });
-  $('copyPathBtn').addEventListener('click', () => {
-    const p = getSelectedProject(); if (!p) return;
-    const path = (state.currentResolved && state.currentResolved.nasEpDir) || p.nasDir;
-    copyText(path);
-    setStatus(`已复制 NAS 路径: ${path}`);
-  });
-  $('copyMsgBtn').addEventListener('click', () => {
-    const p = getSelectedProject(); if (!p) return;
-    const path = (state.currentResolved && state.currentResolved.nasEpDir) || p.nasDir;
-    const countText = (state.currentResolved && state.currentResolved.nasExists) ? `  共 ${state.currentResolved.nasCount} 个文件` : '';
-    const today = new Date().toISOString().slice(0, 10);
-    const msg = `交付通知：\n项目：${p.name}\n存放路径：${path}${countText}\n交付时间：${today}`;
-    copyText(msg);
-    setStatus('已复制交付信息到剪贴板');
-  });
-
-  // 待交付操作
-  $('refreshPendingBtn').addEventListener('click', () => refreshDetail());
-  $('checkAllBtn').addEventListener('click', () => setAllPendingChecked(true));
-  $('uncheckAllBtn').addEventListener('click', () => setAllPendingChecked(false));
-  $('copySelectedBtn').addEventListener('click', async () => {
-    if (state.selectedIndex < 0) return;
-    const files = getCheckedPendingFiles();
-    if (files.length === 0) { alert('请先勾选要复制的文件'); return; }
-    if (!state.currentResolved || !state.currentResolved.relPath) { alert('未检测到关键词目录'); return; }
-    const keyword = el.keywordInput.value.trim() || '项目归档资料';
-    setStatus(`正在复制 ${files.length} 个文件...`);
-    const result = await api.post(`/api/projects/${state.selectedIndex}/copy`, { fileNames: files, keyword });
-    setStatus(result.success ? `复制完成：成功 ${result.ok}，失败 ${result.fail}` : '复制失败');
-    refreshDetail();
-  });
-
-  // ==================== 项目弹窗事件 ====================
-  $('closeProjectModal').addEventListener('click', () => closeProjectModal());
-  $('cancelProjectModal').addEventListener('click', () => closeProjectModal());
-  $('projectModal').querySelector('.modal-overlay').addEventListener('click', () => closeProjectModal());
-  $('saveProjectBtn').addEventListener('click', saveProject);
-
-  // 表单自动填充项目名（新建时，输入本地目录后自动提取末级文件夹名）
-  let nameUserEdited = false;
-  el.formName.addEventListener('input', () => { nameUserEdited = true; });
-  el.formLocalDir.addEventListener('input', () => {
-    if (state.editingProject >= 0 || nameUserEdited) return;
-    const leaf = el.formLocalDir.value.replace(/[\\/]+$/, '').split(/[\\/]/).pop();
-    if (leaf) { el.formName.value = leaf; }
-  });
-
-  // ==================== 批量导入弹窗事件 ====================
-  $('closeImportModal').addEventListener('click', () => closeImportModal());
-  $('closeImportBtn').addEventListener('click', () => closeImportModal());
-  $('importModal').querySelector('.modal-overlay').addEventListener('click', () => closeImportModal());
-  $('scanBtn').addEventListener('click', doScan);
-  $('addTemplateBtn').addEventListener('click', addTemplateRow);
-  $('doImportBtn').addEventListener('click', doImport);
-  $('selectAllCandidatesBtn').addEventListener('click', () => setAllCandidatesChecked(true));
-  $('deselectAllCandidatesBtn').addEventListener('click', () => setAllCandidatesChecked(false));
-  $('applyBatchTemplateBtn').addEventListener('click', applyBatchTemplate);
-
-  // 项目搜索
-  el.projectSearch.addEventListener('input', () => renderProjectList());
-
-  // 修改交付
-  $('modifyRefreshBtn').addEventListener('click', () => refreshModify());
-  $('modifyCheckAllBtn').addEventListener('click', () => {
-    el.modifyList.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = true; });
-  });
-  $('modifyUncheckBtn').addEventListener('click', () => {
-    el.modifyList.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = false; });
-  });
-  $('modifyCopyBtn').addEventListener('click', () => copyModifyBatches());
+  var b = $('btnOpenLocal'); if (b) b.onclick = function() { if (resolved && resolved.localEpDir) api.post('/api/open-explorer', { path: resolved.localEpDir }); };
+  b = $('btnOpenNas'); if (b) b.onclick = function() { if (resolved && resolved.nasEpDir) api.post('/api/open-explorer', { path: resolved.nasEpDir }); };
+  b = $('btnCopyPath'); if (b) b.onclick = function() { copyText((resolved && resolved.nasEpDir) || projects[sel].nasDir); };
+  b = $('btnCopyMsg'); if (b) b.onclick = copyDeliveryMsg;
+  b = $('btnRefresh'); if (b) b.onclick = refreshPending;
+  b = $('btnCheckAll'); if (b) b.onclick = function() { checkAll('pendingList', true); };
+  b = $('btnUncheckAll'); if (b) b.onclick = function() { checkAll('pendingList', false); };
+  b = $('btnCopy'); if (b) b.onclick = copyPending;
+  b = $('btnModRefresh'); if (b) b.onclick = refreshModify;
+  b = $('btnModCheckAll'); if (b) b.onclick = function() { checkAll('modifyList', true); };
+  b = $('btnModUncheckAll'); if (b) b.onclick = function() { checkAll('modifyList', false); };
+  b = $('btnModCopy'); if (b) b.onclick = copyModifyBatches;
 }
 
-// ==================== 项目弹窗 ====================
-function openProjectModal(editIndex) {
-  state.editingProject = editIndex;
-  el.modalTitle.textContent = editIndex >= 0 ? '编辑项目' : '新建项目';
-  if (editIndex >= 0) {
-    const p = state.projects[editIndex];
-    el.formName.value = p.name;
-    el.formLocalDir.value = p.localDir;
-    el.formNasDir.value = p.nasDir;
-    el.formStatus.value = p.status || 'active';
-  } else {
-    el.formName.value = '';
-    el.formLocalDir.value = '';
-    el.formNasDir.value = '';
-    el.formStatus.value = 'active';
+// ==================== 检测 ====================
+async function refreshDetail() {
+  if (sel < 0) return;
+  var kw = $('keywordInput').value || '项目归档资料';
+  resolved = await api.get('/api/projects/' + sel + '/detect?keyword=' + encodeURIComponent(kw));
+  var dl = $('detectLocal'), dn = $('detectNas'), ds = $('detectSummary');
+  if (!resolved.relPath) { dl.textContent = '未找到含"' + kw + '"的子目录'; dn.textContent = ''; ds.textContent = ''; }
+  else {
+    dl.innerHTML = esc(resolved.localEpDir) + ' <span style="color:' + (resolved.localExists ? '#22c55e' : '#ef4444') + '">[' + (resolved.localExists ? resolved.localCount + ' 个文件' : '不存在') + ']</span>';
+    dn.innerHTML = esc(resolved.nasEpDir) + ' <span style="color:' + (resolved.nasExists ? '#22c55e' : '#94a3b8') + '">[' + (resolved.nasExists ? resolved.nasCount + ' 个文件' : '不存在') + ']</span>';
+    var d = resolved.localCount - resolved.nasCount;
+    if (d > 0) ds.innerHTML = '<span style="color:#f59e0b">⚠ 本地比NAS多 ' + d + ' 个文件</span>';
+    else if (resolved.localExists && resolved.nasExists) ds.innerHTML = '<span style="color:#22c55e">✓ 文件一致</span>';
   }
-  el.projectModal.style.display = '';
+  refreshPending();
 }
 
-function closeProjectModal() {
-  el.projectModal.style.display = 'none';
-}
-
-async function saveProject() {
-  const name = el.formName.value.trim();
-  if (!name) { alert('请输入项目名称'); return; }
-  const data = {
-    name,
-    localDir: el.formLocalDir.value.trim(),
-    nasDir: el.formNasDir.value.trim(),
-    status: el.formStatus.value
-  };
-  if (state.editingProject >= 0) {
-    await api.put(`/api/projects/${state.editingProject}`, data);
-  } else {
-    await api.post('/api/projects', data);
-  }
-  closeProjectModal();
-  await loadProjects();
-  if (state.editingProject >= 0) {
-    state.selectedIndex = state.editingProject;
-  } else {
-    state.selectedIndex = state.projects.length - 1;
-  }
-  selectProject(state.selectedIndex);
-}
-
-// ==================== 批量导入弹窗 ====================
-function openImportModal() {
-  state.importCandidates = [];
-  state.importTemplates = JSON.parse(JSON.stringify(state.settings.templates || []));
-  el.importLocalRoot.value = '';
-  el.candidateList.innerHTML = '';
-  el.scanSummary.textContent = '';
-  el.batchOpsBar.style.display = 'flex';
-  renderTemplateList();
-  renderCandidateList();
-  el.importModal.style.display = '';
-}
-
-function closeImportModal() {
-  el.importModal.style.display = 'none';
-}
-
-// 模板管理
-function renderTemplateList() {
-  el.templateList.innerHTML = '';
-  state.importTemplates.forEach((t, i) => {
-    const div = document.createElement('div');
-    div.className = 'template-item';
-    div.innerHTML = `
-      <input class="template-name" value="${escHtml(t.name)}" placeholder="部门名" data-idx="${i}">
-      <input class="template-path" value="${escHtml(t.path)}" placeholder="NAS 路径，例如 \\\\NAS\\部门1" data-idx="${i}">
-      <button class="btn btn-sm btn-outline" data-action="del-template" data-idx="${i}">删除</button>
-    `;
-    el.templateList.appendChild(div);
-  });
-
-  // 绑定事件
-  el.templateList.querySelectorAll('.template-name').forEach(inp => {
-    inp.addEventListener('input', () => { state.importTemplates[inp.dataset.idx].name = inp.value; });
-  });
-  el.templateList.querySelectorAll('.template-path').forEach(inp => {
-    inp.addEventListener('input', () => { state.importTemplates[inp.dataset.idx].path = inp.value; });
-  });
-  el.templateList.querySelectorAll('[data-action="del-template"]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      state.importTemplates.splice(parseInt(btn.dataset.idx), 1);
-      renderTemplateList();
-    });
-  });
-}
-
-function addTemplateRow() {
-  state.importTemplates.push({ name: '', path: '' });
-  renderTemplateList();
-}
-
-// 扫描
-async function doScan() {
-  const localRoot = el.importLocalRoot.value.trim();
-  if (!localRoot) { alert('请输入本地根目录'); return; }
-
-  // 保存模板
-  await api.put('/api/import/templates', { templates: state.importTemplates });
-  state.settings.templates = state.importTemplates;
-
-  const result = await api.post('/api/import/scan', { localRoot });
-  if (result.error) { alert(result.error); return; }
-
-  state.importCandidates = (result.candidates || []).map(c => ({
-    ...c,
-    nasDir: '',
-    checked: true,
-    templateIndex: -1
-  }));
-
-  el.scanSummary.textContent = `共 ${result.totalDirs} 个子文件夹，已跳过 ${result.skipCount} 个已有项目，可导入 ${result.candidates.length} 个`;
-  renderCandidateList();
-}
-
-function renderCandidateList() {
-  el.candidateList.innerHTML = '';
-  if (state.importCandidates.length === 0) {
-    el.candidateList.innerHTML = '<div class="pending-empty">暂无候选项目，请先扫描</div>';
-    return;
-  }
-
-  state.importCandidates.forEach((c, i) => {
-    const nasPreview = c.nasDir || (c.templateIndex >= 0 && state.importTemplates[c.templateIndex]
-      ? (state.importTemplates[c.templateIndex].path.replace(/[\\/]+$/, '') + '\\' + c.name)
-      : '(未设置)');
-
-    const div = document.createElement('div');
-    div.className = 'candidate-item';
-    div.innerHTML = `
-      <input type="checkbox" ${c.checked ? 'checked' : ''} data-idx="${i}">
-      <span class="cand-name" title="${escHtml(c.name)}">${escHtml(c.name)}</span>
-      <span class="cand-local" title="${escHtml(c.localDir)}">${escHtml(c.localDir)}</span>
-      <select data-idx="${i}" style="width:120px">
-        <option value="-1">选择部门...</option>
-        ${state.importTemplates.map((t, ti) => `<option value="${ti}" ${c.templateIndex === ti ? 'selected' : ''}>${escHtml(t.name || `模板${ti + 1}`)}</option>`).join('')}
-      </select>
-      <span class="cand-nas" title="${escHtml(nasPreview)}">${escHtml(nasPreview)}</span>
-    `;
-    el.candidateList.appendChild(div);
-  });
-
-  // 绑定事件
-  el.candidateList.querySelectorAll('input[type="checkbox"]').forEach(cb => {
-    cb.addEventListener('change', () => {
-      state.importCandidates[cb.dataset.idx].checked = cb.checked;
-    });
-  });
-  el.candidateList.querySelectorAll('select').forEach(sel => {
-    sel.addEventListener('change', () => {
-      const idx = parseInt(sel.dataset.idx);
-      state.importCandidates[idx].templateIndex = parseInt(sel.value);
-      if (state.importCandidates[idx].templateIndex >= 0) {
-        state.importCandidates[idx].nasDir = (state.importTemplates[state.importCandidates[idx].templateIndex].path || '').replace(/[\\/]+$/, '') + '\\' + state.importCandidates[idx].name;
-      } else {
-        state.importCandidates[idx].nasDir = '';
-      }
-      renderCandidateList();
-    });
-  });
-
-  // 更新批量操作模板下拉
-  el.batchTemplateSelect.innerHTML = '<option value="">选择模板...</option>' +
-    state.importTemplates.map((t, i) => `<option value="${i}">${escHtml(t.name || `模板${i + 1}`)}</option>`).join('');
-}
-
-function setAllCandidatesChecked(checked) {
-  state.importCandidates.forEach(c => { c.checked = checked; });
-  el.candidateList.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = checked; });
-}
-
-function applyBatchTemplate() {
-  const ti = parseInt(el.batchTemplateSelect.value);
-  if (isNaN(ti) || ti < 0) { alert('请先选择一个模板'); return; }
-  const template = state.importTemplates[ti];
-  const basePath = (template.path || '').replace(/[\\/]+$/, '');
-  state.importCandidates.forEach(c => {
-    if (c.checked) {
-      c.templateIndex = ti;
-      c.nasDir = basePath + '\\' + c.name;
-    }
-  });
-  renderCandidateList();
-}
-
-async function doImport() {
-  const items = state.importCandidates.filter(c => c.checked).map(c => ({
-    name: c.name,
-    localDir: c.localDir,
-    nasDir: c.nasDir
-  }));
-  if (items.length === 0) { alert('请先勾选要导入的项目'); return; }
-
-  // 保存模板
-  await api.put('/api/import/templates', { templates: state.importTemplates });
-  state.settings.templates = state.importTemplates;
-
-  const result = await api.post('/api/import/batch', { items });
-  if (result.success) {
-    alert(`成功导入 ${result.added} 个项目`);
-    closeImportModal();
-    await loadProjects();
-    if (state.projects.length > 0 && state.selectedIndex < 0) {
-      state.selectedIndex = 0;
-      selectProject(0);
-    }
-  } else {
-    alert(`导入失败: ${result.error}`);
+async function refreshPending() {
+  var list = $('pendingList'); if (!list) return;
+  list.innerHTML = '';
+  if (!resolved || !resolved.relPath || !resolved.localExists) return;
+  var data = await api.get('/api/projects/' + sel + '/pending?keyword=' + encodeURIComponent($('keywordInput').value || '项目归档资料'));
+  var files = data.files || [];
+  $('pendingCount').textContent = files.length + ' 个';
+  if (files.length === 0) { list.innerHTML = '<div class="empty">没有待交付文件</div>'; return; }
+  for (var i = 0; i < files.length; i++) {
+    var d = document.createElement('div'); d.className = 'pi';
+    d.innerHTML = '<input type="checkbox" checked><span>' + esc(files[i]) + '</span>'; list.appendChild(d);
   }
 }
 
-// ==================== 修改交付（上映单集版） ====================
+async function copyPending() {
+  var cbs = document.querySelectorAll('#pendingList input[type=checkbox]');
+  var files = []; for (var i = 0; i < cbs.length; i++) if (cbs[i].checked) files.push(cbs[i].nextElementSibling.textContent);
+  if (files.length === 0) { alert('请先勾选'); return; }
+  setStatus('正在复制 ' + files.length + ' 个文件...');
+  var r = await api.post('/api/projects/' + sel + '/copy', { fileNames: files, keyword: $('keywordInput').value || '项目归档资料' });
+  setStatus(r.success ? '复制完成：成功 ' + r.ok + ' 个' : '复制失败');
+  refreshDetail();
+}
+
+// ==================== 修改交付 ====================
 async function refreshModify() {
-  if (state.selectedIndex < 0) return;
-  const keyword = '上映单集版';
-
-  try {
-    const result = await api.get(`/api/projects/${state.selectedIndex}/modify-batches?keyword=${encodeURIComponent(keyword)}`);
-    if (!result.found) {
-      el.modifyDetect.innerHTML = `<span class="detect-value" style="color:#94a3b8">未找到含"${escHtml(keyword)}"的目录</span>`;
-      el.modifySummary.textContent = '';
-      el.modifyList.innerHTML = '';
-      el.modifyCount.textContent = '0';
-      return;
-    }
-
-    const batches = result.batches || [];
-    el.modifyDetect.innerHTML = `<span class="detect-value">本地: ${escHtml(result.localKwDir)}</span><br><span class="detect-value">NAS: ${escHtml(result.nasKwDir)}</span>`;
-
-    const newBatches = batches.filter(b => !b.nasExists);
-    el.modifyCount.textContent = newBatches.length;
-    el.modifySummary.className = 'detect-summary';
-    if (batches.length === 0) {
-      el.modifySummary.textContent = '暂无修改批次';
-    } else if (newBatches.length > 0) {
-      el.modifySummary.textContent = `${newBatches.length} 个批次待交付`;
-      el.modifySummary.className = 'detect-summary warn';
-    } else {
-      el.modifySummary.textContent = '✅ 所有批次已交付';
-      el.modifySummary.className = 'detect-summary ok';
-    }
-
-    renderModifyBatchList(batches);
-  } catch (err) {
-    el.modifyDetect.innerHTML = '<span class="detect-value" style="color:#dc2626">检测失败</span>';
+  if (sel < 0) return;
+  var data = await api.get('/api/projects/' + sel + '/modify-batches?keyword=' + encodeURIComponent('上映单集版'));
+  var mi = $('modifyInfo'), ms = $('modifySummary'), ml = $('modifyList'), mc = $('modifyCount');
+  if (!mi) return;
+  if (!data.found) { mi.textContent = '未找到"上映单集版"目录'; return; }
+  mi.textContent = '本地: ' + data.localKwDir + '\nNAS: ' + data.nasKwDir;
+  var batches = data.batches || [], nc = 0;
+  ml.innerHTML = '';
+  for (var i = 0; i < batches.length; i++) {
+    var b = batches[i];
+    var d = document.createElement('div'); d.className = 'pi';
+    d.innerHTML = '<input type="checkbox" ' + (b.nasExists ? '' : 'checked') + '><span>' + esc(b.name) + ' (' + b.localFileCount + '个) ' + (b.nasExists ? '[已交付]' : '[待交付]') + '</span>';
+    ml.appendChild(d);
+    if (!b.nasExists) nc++;
   }
-}
-
-function renderModifyBatchList(batches) {
-  el.modifyList.innerHTML = '';
-  if (batches.length === 0) {
-    el.modifyList.innerHTML = '<div class="pending-empty">📭 暂无修改批次</div>';
-    return;
-  }
-  batches.forEach(b => {
-    const div = document.createElement('div');
-    div.className = 'pending-item';
-    const status = b.nasExists
-      ? '<span style="color:#16a34a;font-size:11px;margin-left:auto">✅ 已交付</span>'
-      : '<span style="color:#d97706;font-size:11px;margin-left:auto">⚠️ 待交付</span>';
-    div.innerHTML = `<input type="checkbox" ${b.nasExists ? '' : 'checked'}><span class="pending-name">📁 ${escHtml(b.name)} <span style="color:#94a3b8;font-size:11px">(${b.localFileCount} 个文件)</span></span>${status}`;
-    el.modifyList.appendChild(div);
-  });
+  mc.textContent = nc + ' 待交付';
+  ms.innerHTML = nc > 0 ? '<span style="color:#f59e0b">' + nc + ' 个批次待交付</span>' : '<span style="color:#22c55e">全部已交付</span>';
 }
 
 async function copyModifyBatches() {
-  if (state.selectedIndex < 0) return;
-  const checks = el.modifyList.querySelectorAll('input[type="checkbox"]');
-  const batchNames = [];
-  checks.forEach(cb => {
-    if (cb.checked) {
-      const nameEl = cb.parentElement.querySelector('.pending-name');
-      if (nameEl) {
-        const text = nameEl.textContent.replace('📁 ', '').split(' (')[0];
-        batchNames.push(text);
-      }
-    }
-  });
-  if (batchNames.length === 0) { alert('请先勾选要交付的批次'); return; }
-  const keyword = '上映单集版';
-  setStatus(`正在复制 ${batchNames.length} 个批次...`);
-  try {
-    const result = await api.post(`/api/projects/${state.selectedIndex}/modify-copy-batch`, { batchNames, keyword });
-    if (result.success) {
-      alert(`复制完成：成功 ${result.ok} 个批次，失败 ${result.fail} 个`);
-    } else {
-      alert(`操作失败: ${result.error}`);
-    }
-    refreshModify();
-  } catch (err) {
-    alert('请求失败: ' + err.message);
+  var cbs = document.querySelectorAll('#modifyList input[type=checkbox]');
+  var names = []; for (var i = 0; i < cbs.length; i++) if (cbs[i].checked) names.push(cbs[i].nextElementSibling.textContent.split(' (')[0]);
+  if (names.length === 0) { alert('请先勾选'); return; }
+  setStatus('正在复制 ' + names.length + ' 个批次...');
+  var r = await api.post('/api/projects/' + sel + '/modify-copy-batch', { batchNames: names, keyword: '上映单集版' });
+  setStatus(r.success ? '完成：' + r.ok + ' 成功' : '失败');
+  refreshModify();
+}
+
+// ==================== 弹窗：项目 ====================
+function showProjectDlg(editIdx) {
+  var p = editIdx >= 0 ? projects[editIdx] : { name: '', localDir: '', nasDir: '', status: 'active' };
+  var h = '<div class="fg"><label>项目名称</label><input id="dlgName" value="' + escAttr(p.name) + '"></div>';
+  h += '<div class="fg"><label>本地根目录（从资源管理器地址栏复制）</label><input id="dlgLocal" value="' + escAttr(p.localDir) + '"></div>';
+  h += '<div class="fg"><label>NAS根目录（从地址栏复制）</label><input id="dlgNas" value="' + escAttr(p.nasDir) + '"></div>';
+  h += '<div class="fg"><label>状态</label><select id="dlgStatus"><option value="active"' + (p.status === 'active' ? ' selected' : '') + '>进行中</option><option value="done"' + (p.status === 'done' ? ' selected' : '') + '>已完成</option></select></div>';
+  h += '<div class="modal-btns"><button class="btn btn-primary" onclick="saveProject(' + editIdx + ')">保存</button><button class="btn btn-outline" onclick="closeModal()">取消</button></div>';
+  $('modalTitle').textContent = editIdx >= 0 ? '编辑项目' : '新建项目';
+  $('modalBody').innerHTML = h;
+  $('modalOverlay').style.display = 'flex';
+}
+
+async function saveProject(editIdx) {
+  var data = { name: $('dlgName').value.trim(), localDir: $('dlgLocal').value.trim(), nasDir: $('dlgNas').value.trim(), status: $('dlgStatus').value };
+  if (!data.name) { alert('请输入名称'); return; }
+  if (editIdx >= 0) await api.put('/api/projects/' + editIdx, data);
+  else await api.post('/api/projects', data);
+  closeModal(); projects = await api.get('/api/projects');
+  renderProjectList(); selectProject(editIdx >= 0 ? editIdx : projects.length - 1);
+}
+
+async function delProject() { if (sel < 0) return; if (!confirm('确定删除「' + projects[sel].name + '」？')) return; await api.del('/api/projects/' + sel); projects = await api.get('/api/projects'); if (sel >= projects.length) sel = projects.length - 1; renderProjectList(); selectProject(sel); }
+
+// ==================== 弹窗：批量导入 ====================
+function showImportDlg() {
+  var h = '<div class="fg"><label>本地根目录（从地址栏复制）</label><input id="dlgImportRoot"></div>';
+  h += '<div class="fg"><label>部门模板</label><div id="dlgTplList"></div><button class="btn btn-sm btn-outline" onclick="addTpl()">+ 添加</button></div>';
+  h += '<div style="margin:8px 0"><button class="btn btn-primary" onclick="doScan()">扫描子文件夹</button> <span id="dlgScanInfo" style="color:#94a3b8;font-size:12px"></span></div>';
+  h += '<div id="dlgScanResult" style="max-height:260px;overflow:auto"></div>';
+  h += '<div class="modal-btns"><button class="btn btn-accent" onclick="doImport()">导入选中</button><button class="btn btn-outline" onclick="closeModal()">关闭</button></div>';
+  $('modalTitle').textContent = '批量导入项目';
+  $('modalBody').innerHTML = h;
+  $('modalOverlay').style.display = 'flex';
+  for (var i = 0; i < (settings.templates || []).length; i++) addTplRow(settings.templates[i].name, settings.templates[i].path, i);
+}
+
+window._tplIdx = 0;
+function addTpl() { addTplRow('', '', window._tplIdx++); }
+function addTplRow(name, path, idx) {
+  var c = $('dlgTplList'), d = document.createElement('div'); d.className = 'ir'; d.style.marginBottom = '4px';
+  d.innerHTML = '<input class="tpl-name" value="' + escAttr(name) + '" placeholder="部门名" style="width:80px"><input class="tpl-path" value="' + escAttr(path) + '" placeholder="NAS路径" style="flex:1"><button class="btn btn-sm btn-outline" onclick="this.parentElement.remove()">X</button>';
+  c.appendChild(d);
+}
+
+async function doScan() {
+  scanResults = []; $('dlgScanResult').innerHTML = '';
+  var root = $('dlgImportRoot').value.trim(); if (!root) { alert('请输入本地根目录'); return; }
+  // 保存模板
+  var ns = document.querySelectorAll('#dlgTplList .tpl-name'), ps = document.querySelectorAll('#dlgTplList .tpl-path');
+  var tpls = []; for (var i = 0; i < ns.length; i++) tpls.push({ name: ns[i].value.trim(), path: ps[i].value.trim() });
+  await api.put('/api/import/templates', { templates: tpls }); settings.templates = tpls;
+  // 扫描
+  var r = await api.post('/api/import/scan', { localRoot: root });
+  if (r.error) { alert(r.error); return; }
+  scanResults = r.candidates || [];
+  $('dlgScanInfo').textContent = '可导入 ' + scanResults.length + ' 个';
+  for (var i = 0; i < scanResults.length; i++) {
+    var d = document.createElement('div'); d.className = 'pi';
+    d.innerHTML = '<input type="checkbox" checked><span>' + esc(scanResults[i].name) + ' <span style="color:#94a3b8;font-size:11px">' + esc(scanResults[i].localDir) + '</span></span>';
+    $('dlgScanResult').appendChild(d);
   }
 }
 
-// ==================== 日志面板 ====================
-async function refreshLogs() {
-  const logs = await api.get('/api/logs');
-  $('logContent').innerHTML = logs.length === 0 ? '暂无日志' : logs.map(l => `<div>${escHtml(l)}</div>`).join('');
+async function doImport() {
+  var cbs = document.querySelectorAll('#dlgScanResult input[type=checkbox]');
+  var items = []; for (var i = 0; i < scanResults.length && i < cbs.length; i++) if (cbs[i].checked) items.push({ name: scanResults[i].name, localDir: scanResults[i].localDir });
+  if (items.length === 0) { alert('请先勾选'); return; }
+  var r = await api.post('/api/import/batch', { items: items });
+  if (r.success) { alert('成功导入 ' + r.added + ' 个'); closeModal(); projects = await api.get('/api/projects'); renderProjectList(); }
 }
 
-function bindLogPanel() {
-  const rl = $('refreshLogBtn'); if (rl) rl.addEventListener('click', refreshLogs);
-  const cl = $('clearLogBtn'); if (cl) cl.addEventListener('click', () => { $('logContent').innerHTML = ''; });
-  const sd = $('shutdownBtn');
-  if (sd) sd.addEventListener('click', async () => {
-    if (!confirm('确定要停止服务吗？')) return;
-    await api.post('/api/shutdown');
-  });
+// ==================== 工具 ====================
+function closeModal() { $('modalOverlay').style.display = 'none'; }
+function setStatus(m) { $('statusText').textContent = m; }
+function esc(s) { var d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+function escAttr(s) { return (s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function checkAll(listId, checked) { var cbs = document.querySelectorAll('#' + listId + ' input[type=checkbox]'); for (var i = 0; i < cbs.length; i++) cbs[i].checked = checked; }
+function copyText(text) { navigator.clipboard.writeText(text).catch(function() {}); setStatus('已复制'); }
+function copyDeliveryMsg() {
+  if (sel < 0) return;
+  var path = (resolved && resolved.nasEpDir) || projects[sel].nasDir;
+  var cnt = (resolved && resolved.nasCount) || 0;
+  var d = new Date(), ds = d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate());
+  copyText('交付通知：\n项目：' + projects[sel].name + '\n路径：' + path + ' (' + cnt + ' 个)\n时间：' + ds);
 }
-
-// ==================== 工具函数 ====================
-function getSelectedProject() {
-  if (state.selectedIndex < 0 || state.selectedIndex >= state.projects.length) return null;
-  return state.projects[state.selectedIndex];
-}
-
-function copyText(text) {
-  navigator.clipboard.writeText(text).catch(() => {
-    // 降级方案
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    ta.style.position = 'fixed'; ta.style.left = '-9999px';
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand('copy');
-    document.body.removeChild(ta);
-  });
-}
-
-function setStatus(msg) {
-  el.statusText.textContent = msg;
-  setTimeout(() => { if (el.statusText.textContent === msg) el.statusText.textContent = ''; }, 4000);
-}
-
-function escHtml(str) {
-  const div = document.createElement('div');
-  div.textContent = str || '';
-  return div.innerHTML;
-}
-
-// ==================== 键盘快捷键 ====================
-document.addEventListener('keydown', (e) => {
-  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
-  if (e.key === 'Escape') {
-    closeProjectModal();
-    closeImportModal();
-  }
-});
-
-// ==================== 启动 ====================
-init();
+function pad(n) { return n < 10 ? '0' + n : n; }
+function applyKeyword() { settings.keyword = $('keywordInput').value; api.put('/api/settings', { keyword: settings.keyword }); refreshDetail(); }

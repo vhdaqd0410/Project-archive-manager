@@ -1,236 +1,96 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>项目档案管理器</title>
-  <link rel="stylesheet" href="/css/style.css">
+<meta charset="UTF-8"><title>项目档案管理器</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,"Microsoft YaHei",sans-serif;font-size:13px;background:#f1f5f9;color:#1e293b;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+#header{height:50px;background:#fff;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between;padding:0 16px;flex-shrink:0}
+#header .logo{font-size:16px;font-weight:700}
+#header input{width:160px;height:30px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;font-size:12px;outline:none}
+#header input:focus{border-color:#3b82f6}
+#main{display:flex;flex:1;overflow:hidden}
+#sidebar{width:240px;background:#1e293b;color:#cbd5e1;display:flex;flex-direction:column;flex-shrink:0}
+.sidebar-hdr{padding:12px 14px;font-weight:600;font-size:13px;border-bottom:1px solid rgba(255,255,255,.06);display:flex;justify-content:space-between}
+.sidebar-hdr .badge{background:#3b82f6;color:#fff;font-size:11px;padding:1px 8px;border-radius:10px}
+#sidebar input{margin:6px 8px;padding:5px 10px;border:1px solid rgba(255,255,255,.1);border-radius:14px;background:rgba(255,255,255,.06);color:#e2e8f0;font-size:12px;outline:none}
+#projectList{flex:1;overflow-y:auto}
+#projectList .cat-label{padding:6px 12px;font-size:11px;font-weight:600;color:#94a3b8;cursor:pointer;user-select:none}
+#projectList .cat-label .arr{display:inline-block;transition:transform .15s}
+#projectList .cat-label.folded .arr{transform:rotate(-90deg)}
+#projectList .item{padding:8px 20px;cursor:pointer;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-left:3px solid transparent}
+#projectList .item:hover{background:#2d3a4e}
+#projectList .item.sel{background:#334155;border-left-color:#3b82f6;color:#fff}
+#projectList .item.done{opacity:.5}
+#projectList .item.done.sel{opacity:.8}
+.sidebar-btns{display:flex;flex-wrap:wrap;gap:3px;padding:8px;border-top:1px solid rgba(255,255,255,.06)}
+#rightPanel{flex:1;overflow-y:auto;padding:16px 20px;display:flex;flex-direction:column;gap:12px}
+#rightPanel .empty{flex:1;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:14px}
+.card{background:#fff;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.card-hdr{padding:10px 14px;font-weight:600;font-size:13px;border-bottom:1px solid #f1f5f9}
+.card-body{padding:10px 14px}
+.info-row{display:flex;align-items:center;padding:3px 0;gap:8px;font-size:12px}
+.info-row .lbl{width:50px;color:#94a3b8;flex-shrink:0}
+.info-row .val{font-family:Consolas,monospace;word-break:break-all}
+.act-bar{display:flex;flex-wrap:wrap;gap:6px}
+.pending-list{max-height:220px;overflow-y:auto;border:1px solid #e2e8f0;border-radius:6px;margin:4px 0}
+.pending-list .pi{display:flex;align-items:center;gap:6px;padding:4px 8px;border-bottom:1px solid #f1f5f9;font-size:12px}
+.pending-list .pi:last-child{border-bottom:none}
+.pending-list .pi:hover{background:#f8fafc}
+.pending-list input[type=checkbox]{accent-color:#3b82f6}
+.pending-list .empty{padding:20px;text-align:center;color:#94a3b8;font-size:12px}
+.btn{display:inline-flex;align-items:center;gap:3px;padding:6px 14px;border-radius:6px;font-size:12px;font-weight:500;cursor:pointer;border:none;transition:.15s;white-space:nowrap}
+.btn-sm{padding:3px 8px;font-size:11px}
+.btn-primary{background:#3b82f6;color:#fff}.btn-primary:hover{background:#2563eb}
+.btn-accent{background:#7c3aed;color:#fff}.btn-accent:hover{background:#6d28d9}
+.btn-warn{background:#f59e0b;color:#fff}.btn-warn:hover{background:#d97706}
+.btn-outline{background:#fff;color:#475569;border:1px solid #e2e8f0}.btn-outline:hover{background:#f8fafc}
+.btn-danger{background:#ef4444;color:#fff}.btn-danger:hover{background:#dc2626}
+#statusBar{height:26px;padding:0 12px;display:flex;align-items:center;background:#fff;border-top:1px solid #e2e8f0;font-size:11px;color:#94a3b8;flex-shrink:0}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:100;display:none;justify-content:center;align-items:center}
+.modal-box{background:#fff;border-radius:8px;width:520px;max-height:85vh;overflow-y:auto}
+.modal-hdr{padding:12px 16px;font-weight:600;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between}
+.modal-body{padding:16px}
+.modal-btns{display:flex;justify-content:flex-end;gap:6px;margin-top:12px}
+.fg{margin-bottom:10px}.fg label{display:block;font-size:12px;color:#64748b;margin-bottom:2px}
+.fg input,.fg select{width:100%;height:32px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;font-size:13px;outline:none}
+.fg input:focus,.fg select:focus{border-color:#3b82f6}
+.ir{display:flex;gap:6px}.ir input{flex:1}
+::-webkit-scrollbar{width:5px}::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:3px}
+</style>
 </head>
 <body>
 
-<div id="app">
-
-  <!-- ==================== 顶部栏 ==================== -->
-  <header id="header">
-    <span class="logo">项目档案管理器</span>
-    <div class="header-right">
-      <input type="text" id="keywordInput" placeholder="识别关键字" title="用于自动检测本地/NAS下含此关键字的子目录">
-      <button id="applyKeywordBtn" class="btn btn-sm btn-primary">应用并扫描</button>
-    </div>
-  </header>
-
-  <!-- ==================== 主体 ==================== -->
-  <div id="main">
-
-    <!-- 左侧：项目列表 -->
-    <aside id="sidebar">
-      <div class="sidebar-header">
-        <span>项目列表</span>
-        <span id="projectCount" class="badge">0</span>
-      </div>
-      <div class="sidebar-search">
-        <input type="text" id="projectSearch" placeholder="🔍 搜索项目...">
-      </div>
-      <ul id="projectList"></ul>
-      <div class="sidebar-actions">
-        <button id="addProjectBtn" class="btn btn-sm btn-primary">+ 新建</button>
-        <button id="editProjectBtn" class="btn btn-sm btn-outline" disabled>编辑</button>
-        <button id="deleteProjectBtn" class="btn btn-sm btn-outline" disabled>删除</button>
-        <button id="batchImportBtn" class="btn btn-sm btn-accent">批量导入</button>
-      </div>
-    </aside>
-
-    <!-- 右侧：详情面板 -->
-    <section id="detailPanel">
-      <div id="emptyState" class="empty-state">
-        <div class="empty-icon">📋</div>
-        <p>请从左侧选择一个项目，或新建项目</p>
-        <p class="empty-hint">💡 添加路径时，可在资源管理器地址栏复制后粘贴到输入框</p>
-      </div>
-
-      <div id="detailContent" style="display:none">
-
-        <!-- 目录信息卡片 -->
-        <div class="card">
-          <div class="card-header">📂 项目目录</div>
-          <div class="card-body">
-            <div class="info-row">
-              <span class="info-label">本地根目录</span>
-              <span class="info-value" id="infoLocalDir" title="">-</span>
-            </div>
-            <div class="info-row">
-              <span class="info-label">NAS 根目录</span>
-              <span class="info-value" id="infoNasDir" title="">-</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- 关键词检测卡片 -->
-        <div class="card">
-          <div class="card-header">🔍 关键词目录检测</div>
-          <div class="card-body">
-            <div class="detect-row">
-              <span class="detect-label">本地</span>
-              <span class="detect-value" id="detectLocal">未检测</span>
-            </div>
-            <div class="detect-row">
-              <span class="detect-label">NAS</span>
-              <span class="detect-value" id="detectNas">未检测</span>
-            </div>
-            <div class="detect-summary" id="detectSummary"></div>
-          </div>
-        </div>
-
-        <!-- 操作按钮 -->
-        <div class="action-bar">
-          <button id="openLocalBtn" class="btn btn-primary">📂 打开本地目录</button>
-          <button id="openNasBtn" class="btn btn-primary">🌐 打开NAS目录</button>
-          <button id="copyPathBtn" class="btn btn-outline">📋 复制NAS路径</button>
-          <button id="copyMsgBtn" class="btn btn-outline">✉️ 复制交付信息</button>
-        </div>
-
-        <!-- 待交付文件 -->
-        <div class="card">
-          <div class="card-header">
-            ⚠️ 待交付文件（本地有，NAS 无）
-            <span id="pendingCount" class="badge" style="margin-left:8px">0</span>
-          </div>
-          <div class="card-body">
-            <div id="pendingList" class="pending-list"></div>
-            <div class="pending-actions">
-              <button id="refreshPendingBtn" class="btn btn-sm btn-outline">🔄 刷新</button>
-              <button id="checkAllBtn" class="btn btn-sm btn-outline">全选</button>
-              <button id="uncheckAllBtn" class="btn btn-sm btn-outline">取消全选</button>
-              <button id="copySelectedBtn" class="btn btn-sm btn-accent">📤 复制选中到NAS</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- 上映单集版 - 修改交付 -->
-        <div class="card">
-          <div class="card-header" style="background:#fef3c7">
-            🎬 上映单集版 · 修改交付
-            <button id="modifyRefreshBtn" class="btn btn-sm btn-outline" style="margin-left:8px">🔄 刷新</button>
-            <span id="modifyCount" class="badge" style="margin-left:8px;background:#d97706">0</span>
-          </div>
-          <div class="card-body">
-            <div id="modifyDetect" class="detect-row">
-              <span class="detect-value" style="font-size:12px;color:#94a3b8">选择项目后自动检测</span>
-            </div>
-            <div id="modifySummary" class="detect-summary" style="margin:4px 0"></div>
-            <div id="modifyList" class="pending-list" style="max-height:220px"></div>
-            <div class="pending-actions">
-              <button id="modifyCheckAllBtn" class="btn btn-sm btn-outline">全选</button>
-              <button id="modifyUncheckBtn" class="btn btn-sm btn-outline">取消全选</button>
-              <button id="modifyCopyBtn" class="btn btn-sm btn-accent">📤 复制选中批次到NAS</button>
-            </div>
-          </div>
-        </div>
-
-      </div>
-    </section>
-  </div>
-
-  <!-- 运行日志面板 -->
-  <footer id="logPanel">
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:4px 12px">
-      <span style="font-size:12px;font-weight:600" id="logTitle">📋 运行日志</span>
-      <div style="display:flex;gap:6px">
-        <button class="btn btn-sm btn-outline" id="refreshLogBtn">🔄 刷新</button>
-        <button class="btn btn-sm btn-outline" id="clearLogBtn">清空</button>
-        <button class="btn btn-sm btn-danger" id="shutdownBtn">⏻ 停止服务</button>
-      </div>
-    </div>
-    <div id="logContent" style="padding:0 12px 6px;font-size:11px;color:#94a3b8;max-height:120px;overflow-y:auto;font-family:Consolas,monospace"></div>
-  </footer>
-  <footer id="statusBar"><span id="statusText"></span></footer>
-</div>
-
-<!-- ==================== 新建/编辑项目弹窗 ==================== -->
-<div id="projectModal" class="modal" style="display:none">
-  <div class="modal-overlay"></div>
-  <div class="modal-box">
-    <div class="modal-header">
-      <span id="modalTitle">新建项目</span>
-      <button class="modal-close" id="closeProjectModal">&times;</button>
-    </div>
-    <div class="modal-body">
-      <div class="form-group">
-        <label>项目名称</label>
-        <input type="text" id="formName" placeholder="输入项目名称">
-      </div>
-      <div class="form-group">
-        <label>本地根目录 <span class="form-tip">（在资源管理器地址栏点击 → Ctrl+C → 回到此粘贴）</span></label>
-        <input type="text" id="formLocalDir" placeholder="例如：O:\项目归档资料">
-      </div>
-      <div class="form-group">
-        <label>NAS 根目录 <span class="form-tip">（同上，从地址栏复制路径）</span></label>
-        <input type="text" id="formNasDir" placeholder="例如：\\NAS\部门1">
-      </div>
-      <div class="form-group">
-        <label>项目状态</label>
-        <select id="formStatus" class="form-select">
-          <option value="active">🟢 进行中</option>
-          <option value="done">✅ 已完成</option>
-        </select>
-      </div>
-      <p class="form-hint">只需填根目录，工具会自动查找目录下包含关键字的子文件夹。</p>
-    </div>
-    <div class="modal-footer">
-      <button class="btn btn-outline" id="cancelProjectModal">取消</button>
-      <button class="btn btn-primary" id="saveProjectBtn">保存</button>
-    </div>
+<div id="header">
+  <span class="logo">项目档案管理器</span>
+  <div style="display:flex;align-items:center;gap:6px">
+    <input id="keywordInput" placeholder="识别关键字">
+    <button class="btn btn-sm btn-primary" onclick="applyKeyword()">应用并扫描</button>
   </div>
 </div>
 
-<!-- ==================== 批量导入弹窗 ==================== -->
-<div id="importModal" class="modal" style="display:none">
-  <div class="modal-overlay"></div>
-  <div class="modal-box modal-wide">
-    <div class="modal-header">
-      <span>批量导入项目</span>
-      <button class="modal-close" id="closeImportModal">&times;</button>
-    </div>
-    <div class="modal-body">
-      <div class="form-group">
-        <label>本地根目录 <span class="form-tip">（从资源管理器地址栏复制路径粘贴）</span></label>
-        <input type="text" id="importLocalRoot" placeholder="例如：O:\所有项目">
-      </div>
-
-      <!-- 部门模板管理 -->
-      <div class="form-group">
-        <label>部门 NAS 模板
-          <span style="font-weight:normal;color:#94a3b8;font-size:12px;margin-left:8px">
-            预设各部门的 NAS 路径，扫描后可为每个子文件夹快速分配
-          </span>
-        </label>
-        <div id="templateList" class="template-list"></div>
-        <button id="addTemplateBtn" class="btn btn-sm btn-outline" style="margin-top:4px">+ 添加模板</button>
-      </div>
-
-      <div style="margin:12px 0">
-        <button id="scanBtn" class="btn btn-primary">🔍 扫描子文件夹</button>
-        <span id="scanSummary" style="margin-left:12px;color:#64748b;font-size:13px"></span>
-      </div>
-
-      <div id="candidateList" class="candidate-list"></div>
-
-      <div id="batchOpsBar" style="display:flex;align-items:center;gap:8px;margin:8px 0">
-        <button id="selectAllCandidatesBtn" class="btn btn-sm btn-outline">全选</button>
-        <button id="deselectAllCandidatesBtn" class="btn btn-sm btn-outline">取消全选</button>
-        <span style="color:#64748b;font-size:13px">批量设置模板:</span>
-        <select id="batchTemplateSelect" class="form-select">
-          <option value="">选择模板...</option>
-        </select>
-        <button id="applyBatchTemplateBtn" class="btn btn-sm btn-primary">应用</button>
-      </div>
-    </div>
-    <div class="modal-footer">
-      <button class="btn btn-outline" id="closeImportBtn">关闭</button>
-      <button class="btn btn-accent" id="doImportBtn">导入选中项目</button>
+<div id="main">
+  <div id="sidebar">
+    <div class="sidebar-hdr"><span>项目列表</span><span class="badge" id="projectCount">0</span></div>
+    <input id="searchInput" placeholder="搜索项目..." oninput="renderProjectList()">
+    <div id="projectList"></div>
+    <div class="sidebar-btns">
+      <button class="btn btn-sm btn-primary" onclick="showProjectDlg(-1)">+ 新建</button>
+      <button class="btn btn-sm btn-outline" onclick="if(sel>=0)showProjectDlg(sel)">编辑</button>
+      <button class="btn btn-sm btn-outline" onclick="delProject()">删除</button>
+      <button class="btn btn-sm btn-accent" onclick="showImportDlg()">批量导入</button>
     </div>
   </div>
+  <div id="rightPanel">
+    <div class="empty">请从左侧选择项目，或新建项目</div>
+  </div>
 </div>
+<div id="statusBar"><span id="statusText">就绪</span></div>
+
+<div class="modal-overlay" id="modalOverlay"><div class="modal-box">
+  <div class="modal-hdr"><span id="modalTitle"></span><button class="btn btn-sm btn-outline" onclick="closeModal()">✕</button></div>
+  <div class="modal-body" id="modalBody"></div>
+</div></div>
 
 <script src="/js/app.js"></script>
 </body>
