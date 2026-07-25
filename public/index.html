@@ -10,7 +10,9 @@ body{font-family:-apple-system,"Microsoft YaHei",sans-serif;font-size:13px;backg
 #header input{width:160px;height:30px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;font-size:12px;outline:none}
 #header input:focus{border-color:#3b82f6}
 #main{display:flex;flex:1;overflow:hidden}
-#sidebar{width:300px;background:#1e293b;color:#cbd5e1;display:flex;flex-direction:column;flex-shrink:0;min-width:220px}
+#sidebar{width:340px;background:#1e293b;color:#cbd5e1;display:flex;flex-direction:column;flex-shrink:0;min-width:200px}
+#splitter{width:5px;background:#e2e8f0;cursor:col-resize;flex-shrink:0;transition:background .15s}
+#splitter:hover,#splitter:active{background:#3b82f6}
 .sidebar-hdr{padding:12px 14px;font-weight:600;font-size:13px;border-bottom:1px solid rgba(255,255,255,.06);display:flex;justify-content:space-between}
 .sidebar-hdr .badge{background:#3b82f6;color:#fff;font-size:11px;padding:1px 8px;border-radius:10px}
 #sidebar input{margin:6px 8px;padding:5px 10px;border:1px solid rgba(255,255,255,.1);border-radius:14px;background:rgba(255,255,255,.06);color:#e2e8f0;font-size:12px;outline:none}
@@ -88,6 +90,7 @@ body{font-family:-apple-system,"Microsoft YaHei",sans-serif;font-size:13px;backg
       <button class="sbtn sbtn-import" onclick="showImportDlg()">批量导入</button>
     </div>
   </div>
+  <div id="splitter"></div>
   <div id="rightPanel">
     <div class="empty">请从左侧选择项目，或新建项目</div>
   </div>
@@ -100,5 +103,16 @@ body{font-family:-apple-system,"Microsoft YaHei",sans-serif;font-size:13px;backg
 </div></div>
 
 <script src="/js/app.js"></script>
+<script>
+document.getElementById('splitter').onmousedown = function(e) {
+  e.preventDefault();
+  var sidebar = document.getElementById('sidebar');
+  var startX = e.clientX, startW = sidebar.offsetWidth;
+  document.onmousemove = function(e) {
+    sidebar.style.width = Math.max(200, Math.min(600, startW + e.clientX - startX)) + 'px';
+  };
+  document.onmouseup = function() { document.onmousemove = document.onmouseup = null; };
+};
+</script>
 </body>
 </html>
