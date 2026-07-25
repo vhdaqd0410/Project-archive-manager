@@ -56,10 +56,12 @@ function selectProject(idx) {
     '<div class="card"><div class="card-hdr">🔍 关键词目录检测</div><div class="card-body"><div id="detectLocal" style="font-size:12px;color:#94a3b8">扫描中...</div><div id="detectNas" style="font-size:12px;color:#94a3b8">扫描中...</div><div id="detectSummary" style="font-size:12px;margin-top:4px"></div></div></div>' +
     '<div class="act-bar"><button class="btn btn-primary" id="btnOpenLocal">打开本地</button><button class="btn btn-primary" id="btnOpenNas">打开NAS</button><button class="btn btn-outline" id="btnCopyPath">复制NAS路径</button><button class="btn btn-outline" id="btnCopyMsg">复制交付信息</button></div>' +
     '<div class="card"><div class="card-hdr">⚠ 待交付文件 <span id="pendingCount" style="margin-left:8px">0</span></div><div class="card-body"><div class="pending-list" id="pendingList"></div><div class="act-bar"><button class="btn btn-sm btn-outline" id="btnRefresh">刷新</button><button class="btn btn-sm btn-outline" id="btnCheckAll">全选</button><button class="btn btn-sm btn-outline" id="btnUncheckAll">取消全选</button><button class="btn btn-sm btn-warn" id="btnCopy">复制选中到NAS</button></div></div></div>' +
-    '<div class="card"><div class="card-hdr">🎬 上映单集版 · 修改交付 <span id="modifyCount" style="margin-left:8px">0</span></div><div class="card-body"><div id="modifyInfo" style="font-size:11px;color:#94a3b8">检测中...</div><div id="modifySummary" style="font-size:12px;margin:4px 0"></div><div class="pending-list" id="modifyList"></div><div class="act-bar"><button class="btn btn-sm btn-outline" id="btnModRefresh">刷新</button><button class="btn btn-sm btn-outline" id="btnModCheckAll">全选</button><button class="btn btn-sm btn-outline" id="btnModUncheckAll">取消全选</button><button class="btn btn-sm btn-warn" id="btnModCopy">复制选中到NAS</button></div></div></div>';
+    '<div class="card"><div class="card-hdr">🎬 上映单集版 · 修改交付 <span id="modifyCount" style="margin-left:8px">0</span></div><div class="card-body"><div id="modifyInfo" style="font-size:11px;color:#94a3b8">检测中...</div><div id="modifySummary" style="font-size:12px;margin:4px 0"></div><div class="pending-list" id="modifyList"></div><div class="act-bar"><button class="btn btn-sm btn-outline" id="btnModRefresh">刷新</button><button class="btn btn-sm btn-outline" id="btnModCheckAll">全选</button><button class="btn btn-sm btn-outline" id="btnModUncheckAll">取消全选</button><button class="btn btn-sm btn-warn" id="btnModCopy">复制选中到NAS</button></div></div></div>' +
+    '<div class="card"><div class="card-hdr">📦 000交付 <span id="count000" style="margin-left:8px">0</span></div><div class="card-body"><div id="info000" style="font-size:11px;color:#94a3b8">检测中...</div><div id="summary000" style="font-size:12px;margin:4px 0"></div><div class="pending-list" id="list000"></div><div class="act-bar"><button class="btn btn-sm btn-outline" id="btn000Refresh">刷新</button><button class="btn btn-sm btn-outline" id="btn000CheckAll">全选</button><button class="btn btn-sm btn-outline" id="btn000UncheckAll">取消全选</button><button class="btn btn-sm btn-warn" id="btn000Copy">复制选中到NAS</button></div></div></div>';
   bindEvents();
   refreshDetail();
   refreshModify();
+  refresh000();
 }
 
 function bindEvents() {
@@ -75,6 +77,10 @@ function bindEvents() {
   b = $('btnModCheckAll'); if (b) b.onclick = function() { checkAll('modifyList', true); };
   b = $('btnModUncheckAll'); if (b) b.onclick = function() { checkAll('modifyList', false); };
   b = $('btnModCopy'); if (b) b.onclick = copyModifyBatches;
+  b = $('btn000Refresh'); if (b) b.onclick = refresh000Delivery;
+  b = $('btn000CheckAll'); if (b) b.onclick = function() { checkAll('000List', true); };
+  b = $('btn000UncheckAll'); if (b) b.onclick = function() { checkAll('000List', false); };
+  b = $('btn000Copy'); if (b) b.onclick = copy000Delivery;
 }
 
 // ==================== 检测 ====================
@@ -219,6 +225,37 @@ async function doImport() {
   if (items.length === 0) { alert('请先勾选'); return; }
   var r = await api.post('/api/import/batch', { items: items });
   if (r.success) { alert('成功导入 ' + r.added + ' 个'); closeModal(); projects = await api.get('/api/projects'); renderProjectList(); }
+}
+
+// ==================== 000交付 ====================
+async function refresh000() {
+  if (sel < 0) return;
+  var data = await api.get('/api/projects/' + sel + '/modify-batches?keyword=' + encodeURIComponent('000交付'));
+  var mi = $('info000'), ms = $('summary000'), ml = $('list000'), mc = $('count000');
+  if (!mi) return;
+  if (!data.found) { mi.textContent = '未找到"000交付"目录'; return; }
+  mi.textContent = '本地: ' + data.localKwDir + '\nNAS: ' + data.nasKwDir;
+  var batches = data.batches || [], nc = 0;
+  ml.innerHTML = '';
+  for (var i = 0; i < batches.length; i++) {
+    var b = batches[i];
+    var d = document.createElement('div'); d.className = 'pi';
+    d.innerHTML = '<input type="checkbox" ' + (b.nasExists ? '' : 'checked') + '><span>' + esc(b.name) + ' (' + b.localFileCount + '个) ' + (b.nasExists ? '[已交付]' : '[待交付]') + '</span>';
+    ml.appendChild(d);
+    if (!b.nasExists) nc++;
+  }
+  mc.textContent = nc + ' 待交付';
+  ms.innerHTML = nc > 0 ? '<span style="color:#f59e0b">' + nc + ' 个文件夹待交付</span>' : '<span style="color:#22c55e">全部已交付</span>';
+}
+
+async function copy000Delivery() {
+  var cbs = document.querySelectorAll('#list000 input[type=checkbox]');
+  var names = []; for (var i = 0; i < cbs.length; i++) if (cbs[i].checked) names.push(cbs[i].nextElementSibling.textContent.split(' (')[0]);
+  if (names.length === 0) { alert('请先勾选'); return; }
+  setStatus('正在复制 ' + names.length + ' 个文件夹...');
+  var r = await api.post('/api/projects/' + sel + '/modify-copy-batch', { batchNames: names, keyword: '000交付' });
+  setStatus(r.success ? '完成：' + r.ok + ' 成功' : '失败');
+  refresh000();
 }
 
 // ==================== 工具 ====================
