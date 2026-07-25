@@ -117,6 +117,18 @@ body{font-family:-apple-system,"Microsoft YaHei",sans-serif;font-size:13px;backg
   <div id="sidebar">
     <div class="sidebar-hdr"><span>项目列表</span><span class="badge" id="projectCount">0</span></div>
     <input id="searchInput" placeholder="搜索项目..." oninput="renderProjectList()">
+    <div id="batchBar" style="display:none;padding:4px 10px;border-bottom:1px solid rgba(255,255,255,.05);flex-shrink:0">
+      <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">
+        <button class="btn btn-sm btn-outline" onclick="batchSelectAll()" style="background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.1);color:#cbd5e1;font-size:11px">全选</button>
+        <button class="btn btn-sm btn-outline" onclick="batchClear()" style="background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.1);color:#cbd5e1;font-size:11px">取消</button>
+        <select id="batchStatus" style="height:26px;border:1px solid rgba(255,255,255,.15);border-radius:5px;background:rgba(255,255,255,.05);color:#cbd5e1;font-size:11px;padding:0 6px;outline:none">
+          <option value="editing">🔵 剪辑中</option><option value="modifying">🟠 修改中</option><option value="done">✅ 已完成</option>
+        </select>
+        <button class="btn btn-sm btn-primary" onclick="batchSetStatus()" style="font-size:11px">应用</button>
+        <button class="btn btn-sm btn-danger" onclick="batchDelete()" style="font-size:11px">删除选中</button>
+        <span id="batchCount" style="font-size:10px;color:#94a3b8;margin-left:4px"></span>
+      </div>
+    </div>
     <div id="projectList"></div>
     <div class="sidebar-btns">
       <button class="sbtn sbtn-new" onclick="showProjectDlg(-1)">+ 新建项目</button>

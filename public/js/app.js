@@ -7,6 +7,7 @@ var api = {
 
 var projects = [], settings = {}, sel = -1, resolved = null, scanResults = [];
 var nasDirModify = '', nasDir000 = '';
+var batchSel = {};
 
 window.onload = async function() {
   projects = await api.get('/api/projects');
@@ -16,6 +17,38 @@ window.onload = async function() {
 };
 
 function $(id) { return document.getElementById(id); }
+
+// ==================== 批量操作 ====================
+function updateBatchBar() {
+  var keys = Object.keys(batchSel).filter(function(k) { return batchSel[k]; });
+  var bar = $('batchBar'), count = $('batchCount');
+  if (keys.length > 0) { bar.style.display = ''; count.textContent = '已选 ' + keys.length + ' 个'; }
+  else { bar.style.display = 'none'; }
+}
+function batchSelectAll() {
+  var search = ($('searchInput').value || '').toLowerCase();
+  for (var i = 0; i < projects.length; i++) { if (search && projects[i].name.toLowerCase().indexOf(search) < 0) continue; batchSel[i] = true; }
+  renderProjectList();
+}
+function batchClear() { batchSel = {}; renderProjectList(); }
+function toggleBatch(idx, ev) { ev.stopPropagation(); batchSel[idx] = !batchSel[idx]; updateBatchBar(); }
+async function batchSetStatus() {
+  var status = $('batchStatus').value;
+  var keys = Object.keys(batchSel).filter(function(k) { return batchSel[k]; });
+  if (keys.length === 0) { alert('请先勾选项目'); return; }
+  for (var k = 0; k < keys.length; k++) await api.put('/api/projects/' + keys[k] + '/status', { status: status });
+  batchSel = {}; projects = await api.get('/api/projects'); renderProjectList();
+  if (sel >= 0 && sel < projects.length) selectProject(sel);
+}
+async function batchDelete() {
+  var keys = Object.keys(batchSel).filter(function(k) { return batchSel[k]; });
+  if (keys.length === 0) { alert('请先勾选项目'); return; }
+  if (!confirm('确定删除 ' + keys.length + ' 个项目？')) return;
+  keys.sort(function(a,b) { return b - a; });
+  for (var k = 0; k < keys.length; k++) await api.del('/api/projects/' + keys[k]);
+  batchSel = {}; projects = await api.get('/api/projects'); if (sel >= projects.length) sel = projects.length - 1;
+  renderProjectList(); if (sel >= 0) selectProject(sel); else $('rightPanel').innerHTML = '<div class="empty">请从左侧选择项目，或新建项目</div>';
+}
 
 // ==================== 项目列表 ====================
 function renderProjectList() {
@@ -35,7 +68,7 @@ function renderProjectList() {
     for (var j = 0; j < indices.length; j++) {
       var idx = indices[j], p = projects[idx], s = p.status || 'editing';
       var d = document.createElement('div'); d.className = 'item ' + s + (idx === sel ? ' sel' : '');
-      d.innerHTML = '<span class="dot"></span>' + esc(p.name);
+      d.innerHTML = '<input type="checkbox" style="accent-color:#3b82f6;width:13px;height:13px;flex-shrink:0"' + (batchSel[idx] ? ' checked' : '') + ' onclick="toggleBatch(' + idx + ',event)"><span class="dot"></span>' + esc(p.name);
       d.onclick = (function(i) { return function() { selectProject(i); }; })(idx);
       list.appendChild(d);
     }
