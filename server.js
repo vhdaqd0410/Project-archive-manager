@@ -15,9 +15,6 @@ const server = app.listen(PORT, () => {
   console.log(`\n✅ 项目档案管理器已启动: ${url}`);
   console.log(`📌 PID: ${process.pid}`);
   console.log(`🛑 Ctrl+C 停止\n`);
-  if (!process.env.RESTARTED) {
-    require('child_process').exec(`start "" "${url}"`);
-  }
 });
 
 process.on('SIGINT', () => {

@@ -254,16 +254,42 @@ router.post('/open-explorer', (req, res) => {
 });
 
 router.post('/pick-folder', (req, res) => {
-  const os = require('os');
   try {
-    const tmpFile = path.join(os.tmpdir(), 'pam_pickfolder_' + Date.now() + '.vbs');
-    fs.writeFileSync(tmpFile,
-      'Set o=CreateObject("Shell.Application")\n' +
-      'Set f=o.BrowseForFolder(0,"选择文件夹",0)\n' +
-      'If Not f Is Nothing Then WScript.Echo f.Self.Path\n', 'utf8');
-    const result = execSync('cscript //NoLogo "' + tmpFile + '"', { encoding: 'utf8', timeout: 120000 }).trim();
-    try { fs.unlinkSync(tmpFile); } catch(e) {}
-    res.json({ success: true, path: result || '' });
+    const os = require('os');
+    const baseName = 'pam_pf_' + Date.now();
+    const vbsFile = path.join(os.tmpdir(), baseName + '.vbs');
+    const resultFile = path.join(os.tmpdir(), baseName + '_r.txt');
+
+    const vbs = [
+      'Set sa = CreateObject("Shell.Application")',
+      'Set f  = sa.BrowseForFolder(0, "Select Folder", 81, 0)',
+      'If Not f Is Nothing Then',
+      '  Set fs = CreateObject("Scripting.FileSystemObject")',
+      '  fs.CreateTextFile("' + resultFile.replace(/\\/g, '\\\\') + '", True).Write f.Self.Path',
+      'End If'
+    ].join('\r\n');
+    fs.writeFileSync(vbsFile, vbs, 'utf8');
+
+    // 独立启动：CMD 窗口最小化，wscript 的对话框有可见宿主不会闪退
+    execSync('start "PickFolder" /min cmd /c wscript.exe "' + vbsFile + '"', { timeout: 3000 });
+
+    // 轮询结果
+    let tries = 0;
+    const poll = () => {
+      tries++;
+      if (fs.existsSync(resultFile)) {
+        const sel = fs.readFileSync(resultFile, 'utf8').trim();
+        try { fs.unlinkSync(resultFile); } catch(e) {}
+        try { fs.unlinkSync(vbsFile); } catch(e) {}
+        return res.json({ success: true, path: sel });
+      }
+      if (tries > 90) {
+        try { fs.unlinkSync(vbsFile); } catch(e) {}
+        return res.json({ success: false, path: '', error: '超时或未选择' });
+      }
+      setTimeout(poll, 1000);
+    };
+    setTimeout(poll, 500);
   } catch(e) { res.json({ success: false, path: '', error: e.message }); }
 });
 
@@ -425,6 +451,14 @@ router.post('/server/restart', (req, res) => {
     child.unref();
     process.exit(0);
   }, 1500);
+});
+
+router.post('/server/stop', (req, res) => {
+  res.json({ success: true, message: '服务正在关闭...' });
+  setTimeout(() => {
+    console.log('🛑 收到网页端关闭指令，正在退出...');
+    process.exit(0);
+  }, 200);
 });
 
 module.exports = router;

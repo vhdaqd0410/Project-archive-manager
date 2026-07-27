@@ -389,7 +389,7 @@ async function delProject() {
 
 // ==================== 弹窗：批量导入 ====================
 function showImportDlg() {
-  let h = '<div class="fg"><label>本地根目录（从地址栏复制）</label><input id="dlgImportRoot"></div>';
+  let h = '<div class="fg"><label>本地根目录</label><div class="ir"><input id="dlgImportRoot"><button class="btn btn-sm btn-outline" onclick="pickFolder(\'dlgImportRoot\')">浏览</button></div></div>';
   h += '<div class="fg"><label>部门模板</label><div id="dlgTplList"></div><button class="btn btn-sm btn-outline" onclick="addTpl()">+ 添加</button></div>';
   h += '<div style="margin:8px 0"><button class="btn btn-primary" onclick="doScan()">扫描子文件夹</button> <span id="dlgScanInfo" style="color:#94a3b8;font-size:12px"></span></div>';
   h += '<div id="dlgScanResult" style="max-height:260px;overflow:auto"></div>';
@@ -398,6 +398,7 @@ function showImportDlg() {
   $('modalBody').innerHTML = h;
   $('modalOverlay').style.display = 'flex';
   const tpls = settings.templates || [];
+  window._tplIdx = tpls.length; // 避免新建行 ID 与已有行冲突
   for (let i = 0; i < tpls.length; i++) addTplRow(tpls[i].name, tpls[i].path, i);
 }
 
@@ -405,7 +406,7 @@ window._tplIdx = 0;
 function addTpl() { addTplRow('', '', window._tplIdx++); }
 function addTplRow(name, pathVal, idx) {
   const c = $('dlgTplList'), d = document.createElement('div'); d.className = 'ir'; d.style.marginBottom = '4px';
-  d.innerHTML = '<input class="tpl-name" value="' + escAttr(name) + '" placeholder="部门名" style="width:80px"><input class="tpl-path" value="' + escAttr(pathVal) + '" placeholder="NAS路径" style="flex:1"><button class="btn btn-sm btn-outline" onclick="this.parentElement.remove()">X</button>';
+  d.innerHTML = '<input class="tpl-name" value="' + escAttr(name) + '" placeholder="部门名" style="width:80px"><input class="tpl-path" id="tplPath_' + idx + '" value="' + escAttr(pathVal) + '" placeholder="NAS路径" style="flex:1"><button class="btn btn-sm btn-outline" onclick="pickFolder(\'tplPath_' + idx + '\')">浏览</button><button class="btn btn-sm btn-outline" onclick="this.parentElement.remove()">✕</button>';
   c.appendChild(d);
 }
 
@@ -614,10 +615,23 @@ async function refreshHistory() {
   } catch { /* 静默处理 */ }
 }
 
-// ==================== 路径 / 文件夹操作 ====================
+// ==================== 文件夹浏览 ====================
+/**
+ * 打开系统原生"选择文件夹"对话框（PowerShell FolderBrowserDialog）
+ * 这是 Windows 下最可靠的方式，支持网络映射盘
+ */
 async function pickFolder(inputId) {
-  const r = await api.post('/api/pick-folder', {});
-  if (r.success && r.path) { const el = $(inputId); if (el) el.value = r.path; }
+  try {
+    const r = await api.post('/api/pick-folder', {});
+    if (r.success && r.path) {
+      const el = document.getElementById(inputId);
+      if (el) el.value = r.path;
+    } else if (r.error) {
+      toast('选择失败: ' + r.error, 'error');
+    }
+  } catch (e) {
+    toast('选择失败: ' + e.message, 'error');
+  }
 }
 
 function copyCheckedPaths(listId, baseDir) {
@@ -663,9 +677,10 @@ async function refreshServerStatus() {
     var r = await api.get('/api/server/status');
     el.innerHTML = '<span style="color:#22c55e">🟢</span> 运行中'
       + ' <span style="color:#94a3b8;font-size:10px">PID ' + r.pid + ' · ' + r.uptime + '</span>';
-    el.title = '启动时间: ' + r.startedAt + '\n端口: ' + r.port + '\n点击重启服务';
+    el.title = '启动时间: ' + r.startedAt + '\n端口: ' + r.port + '\n点击重启服务 · 右键关闭服务';
     el.style.cursor = 'pointer';
-    el.onclick = restartServer;
+    el.onclick = function(e) { showServerMenu(e, r); };
+    el.oncontextmenu = function(e) { e.preventDefault(); stopServer(); };
   } catch (e) {
     el.innerHTML = '<span style="color:#ef4444">🔴</span> 离线';
     el.title = '无法连接到服务';
@@ -674,12 +689,32 @@ async function refreshServerStatus() {
   }
 }
 
+function showServerMenu(e, statusInfo) {
+  e.stopPropagation();
+  var drop = document.getElementById('statusDrop');
+  drop.innerHTML = '';
+  var items = [
+    { label: '🔄 重启服务', action: restartServer },
+    { label: '⏹ 关闭服务并退出', action: stopServer }
+  ];
+  for (var i = 0; i < items.length; i++) {
+    var o = document.createElement('div');
+    o.className = 'so';
+    o.textContent = items[i].label;
+    o.onclick = (function(fn) { return function(ev) { ev.stopPropagation(); drop.classList.remove('show'); fn(); }; })(items[i].action);
+    drop.appendChild(o);
+  }
+  var rect = e.currentTarget.getBoundingClientRect();
+  drop.style.left = rect.left + 'px';
+  drop.style.top = (rect.bottom + 2) + 'px';
+  drop.classList.add('show');
+}
+
 async function restartServer() {
   if (!confirm('确定要重启服务？\n重启后页面将自动刷新，请等待约 3 秒。')) return;
   try {
     var r = await api.post('/api/server/restart', {});
     toast(r.message || '服务重启中...', 'warn');
-    // 轮询等待服务恢复
     var attempts = 0;
     var check = setInterval(function() {
       attempts++;
@@ -690,6 +725,20 @@ async function restartServer() {
       if (attempts > 15) { clearInterval(check); document.getElementById('serverIndicator').innerHTML = '<span style="color:#ef4444">🔴</span> 重启超时'; }
     }, 1000);
   } catch (e) { toast('重启失败: ' + e.message, 'error'); }
+}
+
+async function stopServer() {
+  if (!confirm('确定要关闭服务？\n关闭后将自动退出本页面。\n如需重新使用请双击「启动.bat」。')) return;
+  try {
+    await api.post('/api/server/stop', {});
+    toast('服务已关闭，页面即将退出', 'success');
+    // 先关闭当前标签页
+    setTimeout(function() { window.close(); }, 800);
+    // 如果 close 失败（非 js 打开的窗口），显示提示
+    setTimeout(function() {
+      document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-size:18px;color:#94a3b8;font-family:sans-serif">✅ 服务已关闭，请关闭此页面<br><small style="font-size:13px">重新使用请双击「启动.bat」</small></div>';
+    }, 1500);
+  } catch (e) { toast('关闭失败: ' + e.message, 'error'); }
 }
 
 // 每 30 秒刷新一次服务状态
