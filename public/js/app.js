@@ -361,6 +361,9 @@ function showProjectDlg(editIdx) {
   $('modalTitle').textContent = editIdx >= 0 ? '编辑项目' : '新建项目';
   $('modalBody').innerHTML = h;
   $('modalOverlay').style.display = 'flex';
+  // 注入文件夹历史下拉
+  ensureFolderDatalist('dlgLocal'); refreshFolderDatalist('dlgLocal');
+  ensureFolderDatalist('dlgNas'); refreshFolderDatalist('dlgNas');
 }
 
 async function saveProject(editIdx) {
@@ -397,8 +400,10 @@ function showImportDlg() {
   $('modalTitle').textContent = '批量导入项目';
   $('modalBody').innerHTML = h;
   $('modalOverlay').style.display = 'flex';
+  // 注入文件夹历史下拉
+  ensureFolderDatalist('dlgImportRoot'); refreshFolderDatalist('dlgImportRoot');
   const tpls = settings.templates || [];
-  window._tplIdx = tpls.length; // 避免新建行 ID 与已有行冲突
+  window._tplIdx = tpls.length;
   for (let i = 0; i < tpls.length; i++) addTplRow(tpls[i].name, tpls[i].path, i);
 }
 
@@ -406,8 +411,11 @@ window._tplIdx = 0;
 function addTpl() { addTplRow('', '', window._tplIdx++); }
 function addTplRow(name, pathVal, idx) {
   const c = $('dlgTplList'), d = document.createElement('div'); d.className = 'ir'; d.style.marginBottom = '4px';
-  d.innerHTML = '<input class="tpl-name" value="' + escAttr(name) + '" placeholder="部门名" style="width:80px"><input class="tpl-path" id="tplPath_' + idx + '" value="' + escAttr(pathVal) + '" placeholder="NAS路径" style="flex:1"><button class="btn btn-sm btn-outline" onclick="pickFolder(\'tplPath_' + idx + '\')">浏览</button><button class="btn btn-sm btn-outline" onclick="this.parentElement.remove()">✕</button>';
+  const pid = 'tplPath_' + idx;
+  d.innerHTML = '<input class="tpl-name" value="' + escAttr(name) + '" placeholder="部门名" style="width:80px"><input class="tpl-path" id="' + pid + '" value="' + escAttr(pathVal) + '" placeholder="NAS路径" style="flex:1"><button class="btn btn-sm btn-outline" onclick="pickFolder(\'' + pid + '\')">浏览</button><button class="btn btn-sm btn-outline" onclick="this.parentElement.remove()">✕</button>';
   c.appendChild(d);
+  // 为新模板路径注入历史下拉
+  ensureFolderDatalist(pid); refreshFolderDatalist(pid);
 }
 
 async function doScan() {
@@ -638,46 +646,54 @@ async function refreshHistory() {
   } catch { /* 静默处理 */ }
 }
 
-// ==================== 文件夹浏览（系统原生） ====================
-async function pickFolder(inputId) {
-  try {
-    // 尝试使用 File System Access API（Chrome 86+ / Edge 86+）
-    if (window.showDirectoryPicker) {
-      const handle = await window.showDirectoryPicker({ mode: 'read' });
-      const el = document.getElementById(inputId);
-      if (el) {
-        const confirmPath = prompt('已将文件夹"' + handle.name + '"加入选择。\n请在此粘贴完整路径（在资源管理器地址栏 Ctrl+C 复制后在此 Ctrl+V）：', handle.name);
-        if (confirmPath) {
-          el.value = confirmPath.trim();
-          toast('已设置路径', 'success');
-        }
-      }
-      return;
-    }
-  } catch (e) {
-    if (e.name === 'AbortError') return; // 用户取消
-  }
+// ==================== 文件夹浏览（系统原生 Shell 对话框） ====================
+var _folderHistory = [];
+try { _folderHistory = JSON.parse(localStorage.getItem('pam-folder-history') || '[]'); } catch(e) { _folderHistory = []; }
 
-  // 回退方案：后端辅助（Powershell）
+function saveFolderHistory(pathVal) {
+  if (!pathVal || _folderHistory.includes(pathVal)) return;
+  _folderHistory.unshift(pathVal);
+  if (_folderHistory.length > 10) _folderHistory.length = 10;
+  localStorage.setItem('pam-folder-history', JSON.stringify(_folderHistory));
+}
+
+// 为输入框添加历史 datalist（每个输入框一个，id = inputId + '_hist'）
+function ensureFolderDatalist(inputId) {
+  var input = document.getElementById(inputId);
+  if (!input) return;
+  var listId = inputId + '_hist';
+  if (document.getElementById(listId)) return;
+  var dl = document.createElement('datalist');
+  dl.id = listId;
+  document.body.appendChild(dl);
+  input.setAttribute('list', listId);
+}
+
+function refreshFolderDatalist(inputId) {
+  var listId = inputId + '_hist';
+  var dl = document.getElementById(listId);
+  if (!dl) return;
+  dl.innerHTML = '';
+  for (var i = 0; i < _folderHistory.length; i++) {
+    var opt = document.createElement('option');
+    opt.value = _folderHistory[i];
+    dl.appendChild(opt);
+  }
+}
+
+async function pickFolder(inputId) {
   try {
     const r = await api.post('/api/pick-folder', {});
     if (r.success && r.path) {
       const el = document.getElementById(inputId);
-      if (el) { el.value = r.path; toast('已选择路径', 'success'); }
-      else toast('未找到输入框: ' + inputId, 'error');
+      if (el) el.value = r.path;
+      saveFolderHistory(r.path);
+      refreshFolderDatalist(inputId);
     } else if (r.error) {
-      const manualPath = prompt('浏览文件夹失败，请手动粘贴路径\n（在资源管理器地址栏 Ctrl+C 后在此 Ctrl+V）', '');
-      if (manualPath) {
-        const el = document.getElementById(inputId);
-        if (el) el.value = manualPath.trim();
-      }
+      toast('选择失败: ' + r.error, 'error');
     }
   } catch (e) {
-    const manualPath = prompt('浏览失败: ' + (e.message || '未知') + '\n请手动粘贴路径', '');
-    if (manualPath) {
-      const el = document.getElementById(inputId);
-      if (el) el.value = manualPath.trim();
-    }
+    toast('选择失败: ' + e.message, 'error');
   }
 }
 

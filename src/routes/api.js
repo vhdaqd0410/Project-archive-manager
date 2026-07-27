@@ -261,32 +261,44 @@ router.post('/pick-folder', (req, res) => {
   try {
     const os = require('os');
     const baseName = 'pam_pf_' + Date.now();
-    const vbsFile = path.join(os.tmpdir(), baseName + '.vbs');
-    // 结果文件名避免含 \r 等特殊组合（用 s 后缀替代 _r）
+    const pickerVbs = path.join(os.tmpdir(), baseName + '_picker.vbs');
+    const launcherVbs = path.join(os.tmpdir(), baseName + '_launcher.vbs');
     const resultFile = path.join(os.tmpdir(), baseName + '_res.txt');
 
-    const vbs = [
-      'Set sa = CreateObject("Shell.Application")',
-      'Set f  = sa.BrowseForFolder(0, "Select Folder", 81, 0)',
+    // picker.vbs：COM 对话框 → ADODB.Stream(utf-8) 写结果
+    const picker = [
+      'Set sa  = CreateObject("Shell.Application")',
+      'Set f   = sa.BrowseForFolder(0, "Select Folder", 81, 0)',
       'If Not f Is Nothing Then',
-      '  Set fs = CreateObject("Scripting.FileSystemObject")',
-      '  fs.CreateTextFile(WScript.Arguments(0), True).Write f.Self.Path',
+      '  Set stm = CreateObject("ADODB.Stream")',
+      '  stm.Type = 2 : stm.Charset = "utf-8" : stm.Open',
+      '  stm.WriteText f.Self.Path, 0',
+      '  stm.SaveToFile "' + resultFile.replace(/\\/g, '\\\\') + '", 2',
+      '  stm.Close',
       'End If'
     ].join('\r\n');
-    fs.writeFileSync(vbsFile, vbs, 'utf8');
+    fs.writeFileSync(pickerVbs, picker, 'utf8');
 
-    // 不用 windowsHide 和 //B，对话框需要可见宿主
-    execSync('wscript.exe "' + vbsFile + '" "' + resultFile + '"', { timeout: 120000 });
+    // launcher.vbs：WScript.Shell.Run 第2参数=1 激活显示窗口，切断隐藏继承链
+    // 第3参数=True 阻塞等待 picker 完成
+    const launcher = [
+      'Set ws = CreateObject("WScript.Shell")',
+      'ws.Run "wscript.exe \"' + pickerVbs.replace(/\\/g, '\\\\') + '\"", 1, True'
+    ].join('\r\n');
+    fs.writeFileSync(launcherVbs, launcher, 'utf8');
 
-    let selectedPath = '';
+    execSync('wscript.exe "' + launcherVbs + '"', { timeout: 120000 });
+
+    let sel = '';
     if (fs.existsSync(resultFile)) {
-      selectedPath = fs.readFileSync(resultFile, 'utf8').trim();
+      sel = fs.readFileSync(resultFile, 'utf8').replace(/^\uFEFF/, '').trim();
       try { fs.unlinkSync(resultFile); } catch(e) {}
     }
-    try { fs.unlinkSync(vbsFile); } catch(e) {}
-    res.json({ success: true, path: selectedPath });
+    try { fs.unlinkSync(pickerVbs); } catch(e) {}
+    try { fs.unlinkSync(launcherVbs); } catch(e) {}
+    res.json({ success: true, path: sel });
   } catch(e) {
-    res.json({ success: false, path: '', error: e.message || '对话框超时或取消' });
+    res.json({ success: false, path: '', error: e.message || '超时或取消' });
   }
 });
 
