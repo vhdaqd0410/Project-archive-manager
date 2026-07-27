@@ -12,7 +12,7 @@ const { createJob, updateJobProgress, finishJob } = require('./jobs');
 router.get('/', (req, res) => res.json(shared.projects));
 
 router.post('/', (req, res) => {
-  const { name, localDir, nasDir, memo } = req.body;
+  const { name, localDir, nasDir, memo, episodeTarget } = req.body;
   if (!name || !name.trim()) return res.status(400).json({ error: '项目名称不能为空' });
   const p = {
     id: crypto.randomUUID(),
@@ -21,7 +21,8 @@ router.post('/', (req, res) => {
     nasDir: (nasDir || '').trim(),
     memo: (memo || '').trim(),
     status: 'editing',
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
+    episodeTarget: parseInt(episodeTarget) || 0
   };
   shared.projects.push(p); projectService.saveProjects(shared.projects);
   res.json({ success: true, project: p });
@@ -30,7 +31,7 @@ router.post('/', (req, res) => {
 router.put('/:id', (req, res) => {
   const r = shared.getProjectById(req.params.id);
   if (!r) return res.status(404).json({ error: '项目不存在' });
-  const { name, localDir, nasDir, status, memo } = req.body;
+  const { name, localDir, nasDir, status, memo, episodeTarget } = req.body;
   if (!name || !name.trim()) return res.status(400).json({ error: '名称不能为空' });
   shared.projects[r.index] = {
     ...shared.projects[r.index],
@@ -38,6 +39,7 @@ router.put('/:id', (req, res) => {
     localDir: (localDir || '').trim(),
     nasDir: (nasDir || '').trim(),
     memo: memo !== undefined ? (memo || '').trim() : (shared.projects[r.index].memo || ''),
+    episodeTarget: episodeTarget !== undefined ? (parseInt(episodeTarget) || 0) : (shared.projects[r.index].episodeTarget || 0),
     status: status || shared.projects[r.index].status || 'editing'
   };
   projectService.saveProjects(shared.projects);
@@ -176,6 +178,73 @@ router.post('/:id/modify-copy-batch', (req, res) => {
   }
   finishJob(job, job.cancel ? 'cancelled' : 'done', { nasDir: nk });
   projectService.addDeliveryLog(p.name, p.id, '批次复制', `关键词: ${kw}, 批次: ${batchNames.join(', ')}`, ok, fail);
+});
+
+// ==================== 集数监控 ====================
+const VIDEO_EXTS = new Set(['.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.ts']);
+
+function countVideoFiles(dir) {
+  if (!dir || !fs.existsSync(dir)) return 0;
+  let count = 0;
+  try {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (e.isFile() && VIDEO_EXTS.has(path.extname(e.name).toLowerCase())) count++;
+    }
+  } catch (e) {}
+  return count;
+}
+
+function countVideoFilesRecursive(dir) {
+  if (!dir || !fs.existsSync(dir)) return 0;
+  let count = 0;
+  try {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (e.isDirectory()) count += countVideoFilesRecursive(path.join(dir, e.name));
+      else if (VIDEO_EXTS.has(path.extname(e.name).toLowerCase())) count++;
+    }
+  } catch (e) {}
+  return count;
+}
+
+router.get('/:id/monitor', (req, res) => {
+  const r = shared.getProjectById(req.params.id);
+  if (!r) return res.status(404).json({ error: '项目不存在' });
+  const p = r.project;
+  const target = p.episodeTarget || 0;
+  const result = { episodeTarget: target, status: target > 0 ? 'progress' : '无目标' };
+
+  // 关键词目录（初版交付）
+  const kw = shared.settings.keyword || '项目归档资料';
+  const resolved = fileService.resolveEpisodeDirs(p, kw);
+  if (resolved.relPath && resolved.localExists) {
+    result.archiveCount = countVideoFiles(resolved.localEpDir);
+    result.archivePath = resolved.localEpDir;
+  }
+
+  // 上映单集版（修改交付）
+  const modifyRel = fileService.findKeywordDir(p.localDir, '上映单集版') || fileService.findKeywordDir(p.nasDir, '上映单集版');
+  if (modifyRel && fs.existsSync(path.join(p.localDir, modifyRel))) {
+    result.modifyCount = countVideoFilesRecursive(path.join(p.localDir, modifyRel));
+    result.modifyPath = path.join(p.localDir, modifyRel);
+  }
+
+  // 000交付
+  const d000Rel = fileService.findKeywordDir(p.localDir, '000交付') || fileService.findKeywordDir(p.nasDir, '000交付');
+  if (d000Rel && fs.existsSync(path.join(p.localDir, d000Rel))) {
+    result.d000Count = countVideoFilesRecursive(path.join(p.localDir, d000Rel));
+    result.d000Path = path.join(p.localDir, d000Rel);
+  }
+
+  // 判断达标
+  if (target > 0) {
+    const kwCount = result.archiveCount || 0;
+    result.progress = Math.min(100, Math.round(kwCount / target * 100));
+    if (kwCount >= target) { result.status = 'ready'; result.archiveReady = true; }
+    result.modifyReady = (result.modifyCount || 0) > 0;
+    result.d000Ready = (result.d000Count || 0) > 0;
+  }
+
+  res.json(result);
 });
 
 module.exports = router;
