@@ -56,7 +56,7 @@ router.get('/jobs/:jobId', (req, res) => {
     id: job.id, projectName: job.projectName, type: job.type,
     totalItems: job.totalItems, current: job.current,
     completed: job.completed, failed: job.failed, skipped: job.skipped,
-    status: job.status,
+    status: job.status, nasDir: job.nasDir || '',
     currentItem: job.current <= job.totalItems ? (job.items[job.current - 1] || {}) : {},
     elapsed: job.startTime ? ((job.endTime || Date.now()) - job.startTime) : 0
   });
@@ -161,6 +161,11 @@ router.post('/projects/:id/copy', (req, res) => {
   const list = Array.isArray(fileNames) ? fileNames : [];
   const job = createJob(r.project.id, r.project.name, list.length, '单文件复制');
   job.startTime = Date.now();
+
+  // 立即返回 jobId，复制逻辑异步执行
+  res.json({ success: true, jobId: job.id, totalItems: list.length });
+
+  // 异步执行复制
   job.status = 'running';
   let ok = 0, fail = 0, skip = 0, totalBytes = 0;
 
@@ -189,7 +194,6 @@ router.post('/projects/:id/copy', (req, res) => {
   const finalStatus = job.cancel ? 'cancelled' : 'done';
   finishJob(job, finalStatus, { nasDir: resolved.nasEpDir, totalBytes });
   projectService.addDeliveryLog(r.project.name, r.project.id, '单文件复制', `关键词: ${kw}, 文件数: ${list.length}`, ok, fail);
-  res.json({ success: true, jobId: job.id, totalItems: list.length });
 });
 
 // ==================== 检测 ====================
@@ -256,28 +260,24 @@ router.post('/open-explorer', (req, res) => {
 router.post('/pick-folder', (req, res) => {
   try {
     const os = require('os');
-    const { spawnSync } = require('child_process');
     const baseName = 'pam_pf_' + Date.now();
     const vbsFile = path.join(os.tmpdir(), baseName + '.vbs');
-    const resultFile = path.join(os.tmpdir(), baseName + '_r.txt');
+    // 结果文件名避免含 \r 等特殊组合（用 s 后缀替代 _r）
+    const resultFile = path.join(os.tmpdir(), baseName + '_res.txt');
 
-    const vbsLines = [
+    const vbs = [
       'Set sa = CreateObject("Shell.Application")',
       'Set f  = sa.BrowseForFolder(0, "Select Folder", 81, 0)',
       'If Not f Is Nothing Then',
       '  Set fs = CreateObject("Scripting.FileSystemObject")',
-      '  fs.CreateTextFile("' + resultFile + '", True).Write f.Self.Path',
+      '  fs.CreateTextFile(WScript.Arguments(0), True).Write f.Self.Path',
       'End If'
-    ];
-    fs.writeFileSync(vbsFile, vbsLines.join('\r\n'), 'utf8');
+    ].join('\r\n');
+    fs.writeFileSync(vbsFile, vbs, 'utf8');
 
-    // spawnSync 阻塞直到 wscript.exe 退出（用户关闭对话框）
-    spawnSync('wscript.exe', [vbsFile], {
-      timeout: 120000,
-      windowsHide: true
-    });
+    // 不用 windowsHide 和 //B，对话框需要可见宿主
+    execSync('wscript.exe "' + vbsFile + '" "' + resultFile + '"', { timeout: 120000 });
 
-    // 读取结果
     let selectedPath = '';
     if (fs.existsSync(resultFile)) {
       selectedPath = fs.readFileSync(resultFile, 'utf8').trim();
@@ -286,8 +286,7 @@ router.post('/pick-folder', (req, res) => {
     try { fs.unlinkSync(vbsFile); } catch(e) {}
     res.json({ success: true, path: selectedPath });
   } catch(e) {
-    // spawnSync 超时也走这里
-    res.json({ success: false, path: '', error: e.message || '对话框超时' });
+    res.json({ success: false, path: '', error: e.message || '对话框超时或取消' });
   }
 });
 
@@ -366,6 +365,10 @@ router.post('/projects/:id/modify-copy-batch', (req, res) => {
 
   const job = createJob(p.id, p.name, batchNames.length, kw + '交付');
   job.startTime = Date.now();
+
+  // 立即返回 jobId，复制异步执行
+  res.json({ success: true, jobId: job.id, totalItems: batchNames.length });
+
   job.status = 'running';
   let ok = 0, fail = 0;
 
@@ -385,7 +388,6 @@ router.post('/projects/:id/modify-copy-batch', (req, res) => {
   const finalStatus = job.cancel ? 'cancelled' : 'done';
   finishJob(job, finalStatus, { nasDir: nk });
   projectService.addDeliveryLog(p.name, p.id, '批次复制', `关键词: ${kw}, 批次: ${batchNames.join(', ')}`, ok, fail);
-  res.json({ success: true, jobId: job.id, totalItems: batchNames.length });
 });
 
 // ==================== 导出/导入配置 ====================

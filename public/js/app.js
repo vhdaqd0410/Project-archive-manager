@@ -554,7 +554,13 @@ async function pollJob(jobId) {
           addLog('✅ 完成：' + job.completed + ' 成功' + (skipped > 0 ? ' / ' + skipped + ' 跳过' : '') + ' / ' + job.failed + ' 失败');
           setStatus('完成：成功 ' + job.completed);
           updateProgressUI(Object.assign({}, job, { status: 'done' }));
-          setTimeout(function() { document.getElementById('progressPanel').classList.remove('show'); }, 2000);
+          // 自动复制 NAS 路径
+          if (job.nasDir) {
+            copyText(job.nasDir);
+            addLog('📋 已自动复制 NAS 路径: ' + job.nasDir);
+            toast('✅ 完成！NAS 路径已复制到剪贴板', 'success');
+          }
+          setTimeout(function() { document.getElementById('progressPanel').classList.remove('show'); }, 3000);
           resolve(job);
         } else if (job.status === 'cancelled') {
           clearInterval(_pollTimer);
@@ -632,25 +638,46 @@ async function refreshHistory() {
   } catch { /* 静默处理 */ }
 }
 
-// ==================== 文件夹浏览 ====================
-/**
- * 打开系统原生"选择文件夹"对话框（PowerShell FolderBrowserDialog）
- * 这是 Windows 下最可靠的方式，支持网络映射盘
- */
+// ==================== 文件夹浏览（系统原生） ====================
 async function pickFolder(inputId) {
+  try {
+    // 尝试使用 File System Access API（Chrome 86+ / Edge 86+）
+    if (window.showDirectoryPicker) {
+      const handle = await window.showDirectoryPicker({ mode: 'read' });
+      const el = document.getElementById(inputId);
+      if (el) {
+        const confirmPath = prompt('已将文件夹"' + handle.name + '"加入选择。\n请在此粘贴完整路径（在资源管理器地址栏 Ctrl+C 复制后在此 Ctrl+V）：', handle.name);
+        if (confirmPath) {
+          el.value = confirmPath.trim();
+          toast('已设置路径', 'success');
+        }
+      }
+      return;
+    }
+  } catch (e) {
+    if (e.name === 'AbortError') return; // 用户取消
+  }
+
+  // 回退方案：后端辅助（Powershell）
   try {
     const r = await api.post('/api/pick-folder', {});
     if (r.success && r.path) {
       const el = document.getElementById(inputId);
-      if (el) { el.value = r.path; toast('已选择: ' + r.path, 'success'); }
+      if (el) { el.value = r.path; toast('已选择路径', 'success'); }
       else toast('未找到输入框: ' + inputId, 'error');
     } else if (r.error) {
-      toast('选择失败: ' + r.error, 'error');
-    } else {
-      // r.success 为 true 但 path 为空 = 用户取消了
+      const manualPath = prompt('浏览文件夹失败，请手动粘贴路径\n（在资源管理器地址栏 Ctrl+C 后在此 Ctrl+V）', '');
+      if (manualPath) {
+        const el = document.getElementById(inputId);
+        if (el) el.value = manualPath.trim();
+      }
     }
   } catch (e) {
-    toast('选择失败: ' + e.message, 'error');
+    const manualPath = prompt('浏览失败: ' + (e.message || '未知') + '\n请手动粘贴路径', '');
+    if (manualPath) {
+      const el = document.getElementById(inputId);
+      if (el) el.value = manualPath.trim();
+    }
   }
 }
 
@@ -840,16 +867,16 @@ document.addEventListener('keydown', function(e) {
   if (e.key === 'Escape') { e.preventDefault(); closeModal(); }
 });
 
-// ==================== 请求超时封装 (30秒) ====================
+// ==================== 请求超时封装 (2分钟) ====================
 var _apiFetch = async function(url, options) {
   options = options || {};
   var controller = new AbortController();
-  var timeout = setTimeout(function() { controller.abort(); }, 30000);
+  var timeout = setTimeout(function() { controller.abort(); }, 120000);
   try {
     var res = await fetch(url, Object.assign({}, options, { signal: controller.signal }));
     return await res.json();
   } catch (e) {
-    if (e.name === 'AbortError') throw new Error('请求超时（30秒）');
+    if (e.name === 'AbortError') throw new Error('请求超时（120秒）');
     throw e;
   } finally {
     clearTimeout(timeout);
