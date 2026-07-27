@@ -1,115 +1,86 @@
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
 
-// ---------- 配置路径 ----------
-const configDir = path.join(os.homedir(), 'AppData', 'Roaming', 'ProjectDeliveryTool');
-const projectsFile = path.join(configDir, 'projects.json');
-const settingsFile = path.join(configDir, 'settings.json');
+// ---------- 统一数据目录 ----------
+const dataDir = path.join(__dirname, '..', '..', 'data');
+const projectsFile = path.join(dataDir, 'projects.json');
+const settingsFile = path.join(dataDir, 'settings.json');
 
-// ---------- 确保目录存在 ----------
+// ---------- 默认设置 ----------
+const DEFAULT_SETTINGS = { keyword: '项目归档资料', templates: [] };
+
+// ---------- 工具函数 ----------
 function ensureDir(dir) {
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+}
+
+function readJSON(filePath, fallback) {
+  if (!fs.existsSync(filePath)) return fallback;
+  try {
+    const raw = fs.readFileSync(filePath, 'utf-8');
+    return raw.trim() ? JSON.parse(raw) : fallback;
+  } catch (e) {
+    console.error(`[projectService] 读取 ${filePath} 失败:`, e.message);
+    return fallback;
   }
 }
 
-// ---------- 迁移旧数据 ----------
-function migrateOldData() {
-  ensureDir(configDir);
-
-  // 如果新格式的 settings 已存在，跳过迁移
-  const newSettingsPath = path.join(__dirname, '..', '..', 'data', 'settings.json');
-  if (fs.existsSync(newSettingsPath)) return;
-
-  // 读取旧 settings
-  let oldSettings = null;
-  if (fs.existsSync(settingsFile)) {
-    try {
-      oldSettings = JSON.parse(fs.readFileSync(settingsFile, 'utf-8'));
-    } catch { /* 忽略 */ }
+function writeJSON(filePath, data) {
+  ensureDir(path.dirname(filePath));
+  try {
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+  } catch (e) {
+    console.error(`[projectService] 写入 ${filePath} 失败:`, e.message);
   }
-
-  // 读取旧 projects
-  let oldProjects = [];
-  if (fs.existsSync(projectsFile)) {
-    try {
-      const raw = fs.readFileSync(projectsFile, 'utf-8');
-      if (raw.trim()) {
-        oldProjects = JSON.parse(raw);
-        if (!Array.isArray(oldProjects)) oldProjects = [oldProjects];
-      }
-    } catch { /* 忽略 */ }
-  }
-
-  // 写入新格式 projects
-  const newProjects = oldProjects.map(p => ({
-    name: p.Name || '',
-    localDir: p.LocalDir || '',
-    nasDir: p.NasDir || '',
-    status: 'active'
-  }));
-  const dataDir = path.join(__dirname, '..', '..', 'data');
-  ensureDir(dataDir);
-  fs.writeFileSync(path.join(dataDir, 'projects.json'), JSON.stringify(newProjects, null, 2), 'utf-8');
-
-  // 写入新格式 settings
-  const newSettings = {
-    keyword: (oldSettings && oldSettings.Keyword) || '项目归档资料',
-    templates: []
-  };
-  fs.writeFileSync(newSettingsPath, JSON.stringify(newSettings, null, 2), 'utf-8');
 }
 
 // ---------- Project CRUD ----------
-function getProjectsPath() {
-  return path.join(__dirname, '..', '..', 'data', 'projects.json');
-}
-
-function getSettingsPath() {
-  return path.join(__dirname, '..', '..', 'data', 'settings.json');
-}
-
 function loadProjects() {
-  const p = getProjectsPath();
-  ensureDir(path.dirname(p));
-  if (!fs.existsSync(p)) return [];
-  try {
-    const raw = fs.readFileSync(p, 'utf-8');
-    return raw.trim() ? JSON.parse(raw) : [];
-  } catch { return []; }
+  return readJSON(projectsFile, []);
 }
 
 function saveProjects(projects) {
-  const p = getProjectsPath();
-  ensureDir(path.dirname(p));
-  fs.writeFileSync(p, JSON.stringify(projects, null, 2), 'utf-8');
+  writeJSON(projectsFile, projects);
 }
 
 function loadSettings() {
-  const p = getSettingsPath();
-  ensureDir(path.dirname(p));
-  if (!fs.existsSync(p)) {
-    return { keyword: '项目归档资料', templates: [] };
-  }
-  try {
-    return JSON.parse(fs.readFileSync(p, 'utf-8'));
-  } catch {
-    return { keyword: '项目归档资料', templates: [] };
-  }
+  return readJSON(settingsFile, DEFAULT_SETTINGS);
 }
 
 function saveSettings(settings) {
-  const p = getSettingsPath();
-  ensureDir(path.dirname(p));
-  fs.writeFileSync(p, JSON.stringify(settings, null, 2), 'utf-8');
+  writeJSON(settingsFile, settings);
+}
+
+// ---------- 交付历史 ----------
+const deliveryLogFile = path.join(dataDir, 'delivery-log.json');
+const MAX_LOG_ENTRIES = 500;
+
+function loadDeliveryLog() {
+  return readJSON(deliveryLogFile, []);
+}
+
+function addDeliveryLog(projectName, projectId, action, detail, ok, fail) {
+  const logs = loadDeliveryLog();
+  logs.unshift({
+    time: new Date().toISOString(),
+    projectName,
+    projectId,
+    action,
+    detail,
+    ok,
+    fail
+  });
+  // 保留最近 500 条
+  if (logs.length > MAX_LOG_ENTRIES) logs.length = MAX_LOG_ENTRIES;
+  writeJSON(deliveryLogFile, logs);
 }
 
 // ---------- 导出 ----------
 module.exports = {
-  migrateOldData,
   loadProjects,
   saveProjects,
   loadSettings,
-  saveSettings
+  saveSettings,
+  loadDeliveryLog,
+  addDeliveryLog
 };

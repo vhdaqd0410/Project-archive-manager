@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
 
-// ---------- 递归查找含关键词的目录 ----------
+// ---------- 递归查找含关键词的目录（BFS搜索，优先浅层）----------
 function findKeywordDir(root, keyword) {
   if (!root || !fs.existsSync(root)) return null;
   try {
@@ -14,13 +14,13 @@ function findKeywordDir(root, keyword) {
       try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
       catch { return null; }
 
+      // 第一遍：检查当前层级是否有匹配目录
       for (const entry of entries) {
-        if (entry.isDirectory()) {
-          if (entry.name.includes(keyword)) {
-            return path.join(dir, entry.name);
-          }
+        if (entry.isDirectory() && entry.name.includes(keyword)) {
+          return path.join(dir, entry.name);
         }
       }
+      // 第二遍：递归进入子目录
       for (const entry of entries) {
         if (entry.isDirectory()) {
           const found = searchRecursive(path.join(dir, entry.name), depth + 1);
@@ -38,11 +38,20 @@ function findKeywordDir(root, keyword) {
   }
 }
 
+// ---------- 统计目录中的文件数 ----------
+function countFilesInDir(dirPath) {
+  if (!fs.existsSync(dirPath)) return 0;
+  try {
+    return fs.readdirSync(dirPath).filter(f =>
+      fs.statSync(path.join(dirPath, f)).isFile()
+    ).length;
+  } catch { return 0; }
+}
+
 // ---------- 解析关键词目录（本地 + NAS）----------
 function resolveEpisodeDirs(project, keyword) {
   const localRoot = project.localDir;
   const nasRoot = project.nasDir;
-
   const rel = findKeywordDir(localRoot, keyword) || findKeywordDir(nasRoot, keyword);
 
   const result = {
@@ -58,24 +67,10 @@ function resolveEpisodeDirs(project, keyword) {
   if (rel) {
     result.localEpDir = path.join(localRoot, rel);
     result.nasEpDir = path.join(nasRoot, rel);
-
-    if (fs.existsSync(result.localEpDir)) {
-      result.localExists = true;
-      try {
-        result.localCount = fs.readdirSync(result.localEpDir).filter(f =>
-          fs.statSync(path.join(result.localEpDir, f)).isFile()
-        ).length;
-      } catch { result.localCount = 0; }
-    }
-
-    if (fs.existsSync(result.nasEpDir)) {
-      result.nasExists = true;
-      try {
-        result.nasCount = fs.readdirSync(result.nasEpDir).filter(f =>
-          fs.statSync(path.join(result.nasEpDir, f)).isFile()
-        ).length;
-      } catch { result.nasCount = 0; }
-    }
+    result.localExists = fs.existsSync(result.localEpDir);
+    result.nasExists = fs.existsSync(result.nasEpDir);
+    result.localCount = result.localExists ? countFilesInDir(result.localEpDir) : 0;
+    result.nasCount = result.nasExists ? countFilesInDir(result.nasEpDir) : 0;
   }
 
   return result;
@@ -98,7 +93,7 @@ function getPendingFiles(localDir, nasDir) {
       fs.readdirSync(nasDir).filter(f =>
         fs.statSync(path.join(nasDir, f)).isFile()
       ).forEach(f => nasNames.add(f));
-    } catch { /* 忽略 */ }
+    } catch { /* 忽略 NAS 读取错误 */ }
   }
 
   return localFiles.filter(f => !nasNames.has(f));
@@ -106,7 +101,6 @@ function getPendingFiles(localDir, nasDir) {
 
 // ---------- 复制文件到 NAS ----------
 function copyFilesToNas(localEpDir, nasEpDir, fileNames) {
-  // 确保目标目录存在
   if (!fs.existsSync(nasEpDir)) {
     fs.mkdirSync(nasEpDir, { recursive: true });
   }
@@ -135,10 +129,39 @@ function openExplorer(dirPath) {
   });
 }
 
+// ---------- 递归计数文件 ----------
+function countFilesRecursive(dir) {
+  if (!fs.existsSync(dir)) return 0;
+  let c = 0;
+  try {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      c += entry.isDirectory() ? countFilesRecursive(path.join(dir, entry.name)) : 1;
+    }
+  } catch (e) { console.error(`[fileService] countFiles 失败: ${dir}`, e.message); }
+  return c;
+}
+
+// ---------- 递归复制目录 ----------
+function copyDirRecursive(src, dst) {
+  if (!fs.existsSync(dst)) fs.mkdirSync(dst, { recursive: true });
+  const entries = fs.readdirSync(src, { withFileTypes: true });
+  for (const entry of entries) {
+    const s = path.join(src, entry.name);
+    const d = path.join(dst, entry.name);
+    if (entry.isDirectory()) {
+      copyDirRecursive(s, d);
+    } else {
+      fs.copyFileSync(s, d);
+    }
+  }
+}
+
 module.exports = {
   findKeywordDir,
   resolveEpisodeDirs,
   getPendingFiles,
   copyFilesToNas,
-  openExplorer
+  openExplorer,
+  countFilesRecursive,
+  copyDirRecursive
 };

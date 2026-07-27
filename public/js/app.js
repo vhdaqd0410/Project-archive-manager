@@ -1,211 +1,330 @@
-var api = {
+const api = {
   get: async u => (await fetch(u)).json(),
   post: async (u, d) => (await fetch(u, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(d) })).json(),
   put: async (u, d) => (await fetch(u, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(d) })).json(),
   del: async u => (await fetch(u, { method: 'DELETE' })).json()
 };
 
-var projects = [], settings = {}, sel = -1, resolved = null, scanResults = [];
-var nasDirModify = '', nasDir000 = '';
-var localDirModify = '', localDir000 = '';
-var batchSel = {};
-var collapsedGroups = {};
-var checkedModify = {}, checked000 = {};
+let projects = [], settings = {}, sel = -1, resolved = null, scanResults = [];
+let nasDirModify = '', nasDir000 = '', localDirModify = '', localDir000 = '';
+let batchSel = {}, collapsedGroups = { '✅ 已完成': true }, checkedModify = {}, checked000 = {};
 
 window.onload = async function() {
   projects = await api.get('/api/projects');
   settings = await api.get('/api/settings');
   document.getElementById('keywordInput').value = settings.keyword || '项目归档资料';
   renderProjectList();
+  refreshServerStatus();
 };
 
 function $(id) { return document.getElementById(id); }
 
+// ==================== 工具函数 ====================
+function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+function escAttr(s) { return (s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function pad(n) { return n < 10 ? '0' + n : '' + n; }
+function setStatus(m) { $('statusText').textContent = m; }
+function closeModal() { $('modalOverlay').style.display = 'none'; }
+function copyText(text) { navigator.clipboard.writeText(text).catch(() => {}); setStatus('已复制'); }
+
+function addLog(msg) {
+  const t = new Date().toLocaleTimeString();
+  const lc = $('logContent'); if (lc) lc.innerHTML += '<div>[' + t + '] ' + esc(msg) + '</div>';
+  const lp = $('logPanel'); if (lp) lp.scrollTop = lp.scrollHeight;
+}
+
+function checkAll(listId, checked) {
+  document.querySelectorAll('#' + listId + ' input[type=checkbox]').forEach(cb => cb.checked = checked);
+}
+
+// 获取勾选的 checkbox 对应的名称（取 span 文本，截到 ' (' 前）
+function getCheckedNames(listId) {
+  const cbs = document.querySelectorAll('#' + listId + ' input[type=checkbox]');
+  const names = [];
+  for (let i = 0; i < cbs.length; i++) {
+    if (cbs[i].checked) names.push(cbs[i].nextElementSibling.textContent.split(' (')[0]);
+  }
+  return names;
+}
+
 // ==================== 批量操作 ====================
 function updateBatchBar() {
-  var keys = Object.keys(batchSel).filter(function(k) { return batchSel[k]; });
-  var bar = $('batchBar'), count = $('batchCount');
-  if (keys.length > 0) { bar.style.display = ''; count.textContent = '已选 ' + keys.length + ' 个'; }
+  const keys = Object.keys(batchSel).filter(k => batchSel[k]);
+  const bar = $('batchBar'), count = $('batchCount');
+  if (keys.length) { bar.style.display = ''; count.textContent = '已选 ' + keys.length + ' 个'; }
   else { bar.style.display = 'none'; }
 }
 function batchSelectAll() {
-  var search = ($('searchInput').value || '').toLowerCase();
-  for (var i = 0; i < projects.length; i++) { if (search && projects[i].name.toLowerCase().indexOf(search) < 0) continue; batchSel[i] = true; }
+  const search = ($('searchInput').value || '').toLowerCase();
+  for (const p of projects) {
+    if (search && p.name.toLowerCase().indexOf(search) < 0) continue;
+    batchSel[p.id] = true;
+  }
   renderProjectList();
 }
 function batchClear() { batchSel = {}; renderProjectList(); }
-function toggleBatch(idx, ev) { ev.stopPropagation(); batchSel[idx] = !batchSel[idx]; updateBatchBar(); }
+function toggleBatch(pid, ev) { ev.stopPropagation(); batchSel[pid] = !batchSel[pid]; updateBatchBar(); }
+
 async function batchSetStatus() {
-  var status = $('batchStatus').value;
-  var keys = Object.keys(batchSel).filter(function(k) { return batchSel[k]; });
-  if (keys.length === 0) { alert('请先勾选项目'); return; }
+  const status = $('batchStatus').value;
+  const keys = Object.keys(batchSel).filter(k => batchSel[k]);
+  if (!keys.length) { alert('请先勾选项目'); return; }
   setStatus('正在更新 ' + keys.length + ' 个项目...');
   try {
-    for (var k = 0; k < keys.length; k++) await api.put('/api/projects/' + keys[k] + '/status', { status: status });
+    for (const id of keys) await api.put('/api/projects/' + id + '/status', { status });
     setStatus('已更新 ' + keys.length + ' 个项目');
     batchSel = {}; projects = await api.get('/api/projects'); renderProjectList();
     if (sel >= 0 && sel < projects.length) selectProject(sel);
-  } catch(e) { setStatus('更新失败: ' + e.message); }
+  } catch (e) { setStatus('更新失败: ' + e.message); }
 }
+
 async function batchDelete() {
-  var keys = Object.keys(batchSel).filter(function(k) { return batchSel[k]; });
-  if (keys.length === 0) { alert('请先勾选项目'); return; }
+  const keys = Object.keys(batchSel).filter(k => batchSel[k]);
+  if (!keys.length) { alert('请先勾选项目'); return; }
   if (!confirm('确定删除 ' + keys.length + ' 个项目？')) return;
-  keys.sort(function(a,b) { return b - a; });
-  for (var k = 0; k < keys.length; k++) await api.del('/api/projects/' + keys[k]);
-  batchSel = {}; projects = await api.get('/api/projects'); if (sel >= projects.length) sel = projects.length - 1;
-  renderProjectList(); if (sel >= 0) selectProject(sel); else $('rightPanel').innerHTML = '<div class="empty">请从左侧选择项目，或新建项目</div>';
+  // 从后往前删避免索引错乱
+  keys.sort((a, b) => projects.findIndex(p => p.id === b) - projects.findIndex(p => p.id === a));
+  for (const id of keys) await api.del('/api/projects/' + id);
+  batchSel = {}; projects = await api.get('/api/projects');
+  if (sel >= projects.length) sel = projects.length - 1;
+  renderProjectList();
+  if (sel >= 0) selectProject(sel); else $('rightPanel').innerHTML = '<div class="empty">请从左侧选择项目，或新建项目</div>';
 }
+
+// ==================== 状态快速切换 ====================
+var _statusTargetIdx = -1;
+function toggleStatusMenu(e, pid, idx) {
+  e.stopPropagation();
+  _statusTargetIdx = idx;
+  var drop = document.getElementById('statusDrop');
+  var p = projects[idx];
+  var options = [
+    { value: 'editing', icon: '🔵', label: '剪辑中' },
+    { value: 'modifying', icon: '🟠', label: '修改中' },
+    { value: 'done', icon: '✅', label: '已完成' }
+  ];
+  drop.innerHTML = '';
+  for (var i = 0; i < options.length; i++) {
+    var opt = options[i];
+    var o = document.createElement('div');
+    o.className = 'so' + (p.status === opt.value ? ' sel' : '');
+    o.textContent = opt.icon + ' ' + opt.label;
+    o.onclick = (function(val) {
+      return function(ev) { ev.stopPropagation(); setProjectStatus(_statusTargetIdx, val); };
+    })(opt.value);
+    drop.appendChild(o);
+  }
+  // 定位到按钮下方
+  var btn = e.currentTarget;
+  var rect = btn.getBoundingClientRect();
+  drop.style.left = rect.left + 'px';
+  drop.style.top = (rect.bottom + 2) + 'px';
+  drop.classList.add('show');
+}
+
+async function setProjectStatus(idx, status) {
+  var drop = document.getElementById('statusDrop');
+  drop.classList.remove('show');
+  await api.put('/api/projects/' + idx + '/status', { status });
+  projects[idx].status = status;
+  renderProjectList();
+  if (sel === idx) selectProject(idx);
+  toast('状态已更新', 'success');
+}
+
+// 点击其他地方关闭状态下拉 + 滚动/缩放时关闭
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('.item-status')) {
+    document.getElementById('statusDrop').classList.remove('show');
+  }
+});
+document.addEventListener('scroll', function() {
+  document.getElementById('statusDrop').classList.remove('show');
+}, true);
+window.addEventListener('resize', function() {
+  document.getElementById('statusDrop').classList.remove('show');
+});
 
 // ==================== 项目列表 ====================
 function renderProjectList() {
-  var list = $('projectList'), search = ($('searchInput').value || '').toLowerCase();
+  const list = $('projectList'), search = ($('searchInput').value || '').toLowerCase();
   list.innerHTML = '';
-  var editing = [], modifying = [], done = [];
-  for (var i = 0; i < projects.length; i++) {
-    var p = projects[i];
+  const groups = { editing: [], modifying: [], done: [] };
+  for (let i = 0; i < projects.length; i++) {
+    const p = projects[i];
     if (search && p.name.toLowerCase().indexOf(search) < 0) continue;
-    (p.status === 'done' ? done.push(i) : p.status === 'modifying' ? modifying.push(i) : editing.push(i));
+    const g = p.status === 'done' ? 'done' : p.status === 'modifying' ? 'modifying' : 'editing';
+    groups[g].push(i);
   }
-  function group(label, indices) {
-    var h = document.createElement('div'); h.className = 'cat-label';
-    h.innerHTML = '<span class="arr">▼</span> ' + label + ' (' + indices.length + ')';
-    h.onclick = function() { this.classList.toggle('folded'); collapsedGroups[label] = this.classList.contains('folded'); refresh(this); };
-    if (collapsedGroups[label]) h.classList.add('folded');
-    list.appendChild(h);
-    for (var j = 0; j < indices.length; j++) {
-      var idx = indices[j], p = projects[idx], s = p.status || 'editing';
-      var d = document.createElement('div'); d.className = 'item ' + s + (idx === sel ? ' sel' : '');
-      d.innerHTML = '<input type="checkbox" style="accent-color:#3b82f6;width:13px;height:13px;flex-shrink:0"' + (batchSel[idx] ? ' checked' : '') + ' onclick="toggleBatch(' + idx + ',event)"><span class="dot"></span>' + esc(p.name);
-      d.onclick = (function(i) { return function() { selectProject(i); }; })(idx);
-      list.appendChild(d);
-    }
-    refresh(h);
-  }
-  function refresh(h) { var f = h.classList.contains('folded'), e = h.nextElementSibling; while (e && !e.classList.contains('cat-label')) { e.style.display = f ? 'none' : ''; e = e.nextElementSibling; } }
-  group('🔵 剪辑中', editing);
-  group('🟠 修改中', modifying);
-  group('✅ 已完成', done);
+  const groupConfig = [
+    { label: '🔵 剪辑中', key: 'editing' },
+    { label: '🟠 修改中', key: 'modifying' },
+    { label: '✅ 已完成', key: 'done' }
+  ];
+  for (const cfg of groupConfig) renderGroup(list, cfg, groups[cfg.key], search);
   $('projectCount').textContent = projects.length;
+}
+
+function renderGroup(list, cfg, indices) {
+  const h = document.createElement('div');
+  h.className = 'cat-label' + (collapsedGroups[cfg.label] ? ' folded' : '');
+  h.innerHTML = '<span class="arr">▼</span> ' + cfg.label + ' (' + indices.length + ')';
+  h.onclick = function() {
+    this.classList.toggle('folded');
+    collapsedGroups[cfg.label] = this.classList.contains('folded');
+    refreshGroupItems(this);
+  };
+  list.appendChild(h);
+
+  for (const idx of indices) {
+    const p = projects[idx], s = p.status || 'editing';
+    const d = document.createElement('div');
+    d.className = 'item ' + s + (idx === sel ? ' sel' : '');
+    const statusIcon = s === 'done' ? '✅' : s === 'modifying' ? '🟠' : '🔵';
+    const statusTitle = s === 'done' ? '已完成' : s === 'modifying' ? '修改中' : '剪辑中';
+    d.innerHTML =
+      '<input type="checkbox" style="accent-color:#3b82f6;width:13px;height:13px;flex-shrink:0"'
+      + (batchSel[p.id] ? ' checked' : '') + ' onclick="toggleBatch(\'' + p.id + '\',event)">'
+      + '<span class="item-status">'
+      + '<button class="status-btn" title="' + statusTitle + ' · 点击切换" onclick="toggleStatusMenu(event,\'' + p.id + '\',' + idx + ')">' + statusIcon + '</button>'
+      + '</span>'
+      + esc(p.name);
+    d.onclick = (function(i) { return function() { selectProject(i); }; })(idx);
+    list.appendChild(d);
+  }
+  refreshGroupItems(h);
+}
+
+function refreshGroupItems(h) {
+  const folded = h.classList.contains('folded');
+  let e = h.nextElementSibling;
+  while (e && !e.classList.contains('cat-label')) {
+    e.style.display = folded ? 'none' : '';
+    e = e.nextElementSibling;
+  }
 }
 
 function selectProject(idx) {
   sel = idx; resolved = null; renderProjectList();
-  var rp = $('rightPanel');
+  const rp = $('rightPanel');
   if (idx < 0) { rp.innerHTML = '<div class="empty">请从左侧选择项目，或新建项目</div>'; return; }
-  var p = projects[idx];
+  const p = projects[idx];
   rp.innerHTML =
-    '<div class="card"><div class="card-hdr">📂 项目目录</div><div class="card-body"><div class="info-row"><span class="lbl">本地</span><span class="val" id="infoLocalDir">' + esc(p.localDir||'-') + '</span></div><div class="info-row"><span class="lbl">NAS</span><span class="val" id="infoNasDir">' + esc(p.nasDir||'-') + '</span></div></div></div>' +
+    '<div class="card"><div class="card-hdr">📂 项目目录</div><div class="card-body"><div class="info-row"><span class="lbl">本地</span><span class="val" id="infoLocalDir">' + esc(p.localDir || '-') + '</span></div><div class="info-row"><span class="lbl">NAS</span><span class="val" id="infoNasDir">' + esc(p.nasDir || '-') + '<span id="nasStatus" style="margin-left:8px;font-size:11px"></span></span></div>' + (p.memo ? '<div class="info-row"><span class="lbl">备注</span><span class="val" style="color:#f59e0b">' + esc(p.memo) + '</span></div>' : '') + '</div></div>' +
     '<div class="card"><div class="card-hdr">🔍 关键词目录检测</div><div class="card-body"><div id="detectLocal" style="font-size:12px;color:#94a3b8">扫描中...</div><div id="detectNas" style="font-size:12px;color:#94a3b8">扫描中...</div><div id="detectSummary" style="font-size:12px;margin-top:4px"></div></div></div>' +
     '<div class="act-bar"><button class="btn btn-primary" id="btnOpenLocal">打开本地</button><button class="btn btn-primary" id="btnOpenNas">打开NAS</button><button class="btn btn-outline" id="btnCopyPath">复制NAS路径</button><button class="btn btn-outline" id="btnCopyMsg">复制交付信息</button></div>' +
     '<div class="card"><div class="card-hdr">⚠ 待交付文件 <span id="pendingCount" style="margin-left:8px">0</span></div><div class="card-body"><div class="pending-list" id="pendingList"></div><div class="act-bar"><button class="btn btn-sm btn-outline" id="btnRefresh">刷新</button><button class="btn btn-sm btn-outline" id="btnCheckAll">全选</button><button class="btn btn-sm btn-outline" id="btnUncheckAll">取消全选</button><button class="btn btn-sm btn-warn" id="btnCopy">复制选中到NAS</button></div></div></div>' +
     '<div class="card"><div class="card-hdr">🎬 上映单集版 · 修改交付 <span id="modifyCount" style="margin-left:8px">0</span></div><div class="card-body"><div id="modifyInfo" style="font-size:11px;color:#94a3b8">检测中...</div><div id="modifySummary" style="font-size:12px;margin:4px 0"></div><div class="pending-list" id="modifyList"></div><div class="act-bar"><button class="btn btn-sm btn-primary" id="btnModOpenLocal">打开本地</button><button class="btn btn-sm btn-primary" id="btnModOpenNas">打开NAS</button><button class="btn btn-sm btn-outline" id="btnModRefresh">刷新</button><button class="btn btn-sm btn-outline" id="btnModCheckAll">全选</button><button class="btn btn-sm btn-outline" id="btnModUncheckAll">取消全选</button><button class="btn btn-sm btn-outline" id="btnModCopyPath">复制路径</button><button class="btn btn-sm btn-warn" id="btnModCopy">复制选中到NAS</button></div></div></div>' +
     '<div class="card"><div class="card-hdr">📦 000交付 <span id="count000" style="margin-left:8px">0</span></div><div class="card-body"><div id="info000" style="font-size:11px;color:#94a3b8">检测中...</div><div id="summary000" style="font-size:12px;margin:4px 0"></div><div class="pending-list" id="list000"></div><div class="act-bar"><button class="btn btn-sm btn-primary" id="btn000OpenLocal">打开本地</button><button class="btn btn-sm btn-primary" id="btn000OpenNas">打开NAS</button><button class="btn btn-sm btn-outline" id="btn000Refresh">刷新</button><button class="btn btn-sm btn-outline" id="btn000CheckAll">全选</button><button class="btn btn-sm btn-outline" id="btn000UncheckAll">取消全选</button><button class="btn btn-sm btn-outline" id="btn000CopyPath">复制路径</button><button class="btn btn-sm btn-warn" id="btn000Copy">复制选中到NAS</button></div></div></div>' +
-    '<div class="card"><div class="card-hdr">📋 运行日志</div><div class="card-body" id="logPanel" style="max-height:200px;overflow-y:auto;font-family:Consolas,monospace;font-size:11px;color:#64748b;padding:8px 12px"><div id="logContent">就绪</div></div></div>';
+    '<div class="card"><div class="card-hdr">📋 运行日志</div><div class="card-body" id="logPanel" style="max-height:200px;overflow-y:auto;font-family:Consolas,monospace;font-size:11px;color:#64748b;padding:8px 12px"><div id="logContent">就绪</div></div></div>' +
+    '<div class="card"><div class="card-hdr">📜 最近交付记录</div><div class="card-body" id="historyContent" style="max-height:180px;overflow-y:auto;padding:4px 8px">加载中...</div></div>';
   bindEvents();
   refreshDetail();
   refreshModify();
   refresh000();
+  refreshHistory();
 }
 
 function bindEvents() {
-  var b = $('btnOpenLocal'); if (b) b.onclick = function() { var p = (resolved && resolved.localEpDir) || (projects[sel]||{}).localDir; if (p) api.post('/api/open-explorer', { path: p }); };
-  b = $('btnOpenNas'); if (b) b.onclick = function() { var p = (resolved && resolved.nasEpDir) || (projects[sel]||{}).nasDir; if (p) api.post('/api/open-explorer', { path: p }); };
-  b = $('btnCopyPath'); if (b) b.onclick = function() { copyText((resolved && resolved.nasEpDir) || projects[sel].nasDir); };
+  let b = $('btnOpenLocal'); if (b) b.onclick = () => { const p = (resolved && resolved.localEpDir) || (projects[sel] || {}).localDir; if (p) api.post('/api/open-explorer', { path: p }); };
+  b = $('btnOpenNas'); if (b) b.onclick = () => { const p = (resolved && resolved.nasEpDir) || (projects[sel] || {}).nasDir; if (p) api.post('/api/open-explorer', { path: p }); };
+  b = $('btnCopyPath'); if (b) b.onclick = () => copyText((resolved && resolved.nasEpDir) || projects[sel].nasDir);
   b = $('btnCopyMsg'); if (b) b.onclick = copyDeliveryMsg;
   b = $('btnRefresh'); if (b) b.onclick = refreshPending;
-  b = $('btnCheckAll'); if (b) b.onclick = function() { checkAll('pendingList', true); };
-  b = $('btnUncheckAll'); if (b) b.onclick = function() { checkAll('pendingList', false); };
+  b = $('btnCheckAll'); if (b) b.onclick = () => checkAll('pendingList', true);
+  b = $('btnUncheckAll'); if (b) b.onclick = () => checkAll('pendingList', false);
   b = $('btnCopy'); if (b) b.onclick = copyPending;
   b = $('btnModRefresh'); if (b) b.onclick = refreshModify;
-  b = $('btnModCheckAll'); if (b) b.onclick = function() { checkAll('modifyList', true); };
-  b = $('btnModUncheckAll'); if (b) b.onclick = function() { checkAll('modifyList', false); };
+  b = $('btnModCheckAll'); if (b) b.onclick = () => checkAll('modifyList', true);
+  b = $('btnModUncheckAll'); if (b) b.onclick = () => checkAll('modifyList', false);
   b = $('btnModCopy'); if (b) b.onclick = copyModifyBatches;
-  b = $('btnModCopyPath'); if (b) b.onclick = function() { copyCheckedPaths('modifyList', nasDirModify); };
-  b = $('btnModOpenLocal'); if (b) b.onclick = function() { openCheckedDir('modifyList', localDirModify); };
-  b = $('btnModOpenNas'); if (b) b.onclick = function() { openCheckedDir('modifyList', nasDirModify); };
+  b = $('btnModCopyPath'); if (b) b.onclick = () => copyCheckedPaths('modifyList', nasDirModify);
+  b = $('btnModOpenLocal'); if (b) b.onclick = () => openCheckedDir('modifyList', localDirModify);
+  b = $('btnModOpenNas'); if (b) b.onclick = () => openCheckedDir('modifyList', nasDirModify);
   b = $('btn000Refresh'); if (b) b.onclick = refresh000;
-  b = $('btn000CheckAll'); if (b) b.onclick = function() { checkAll('list000', true); };
-  b = $('btn000UncheckAll'); if (b) b.onclick = function() { checkAll('list000', false); };
+  b = $('btn000CheckAll'); if (b) b.onclick = () => checkAll('list000', true);
+  b = $('btn000UncheckAll'); if (b) b.onclick = () => checkAll('list000', false);
   b = $('btn000Copy'); if (b) b.onclick = copy000Delivery;
-  b = $('btn000CopyPath'); if (b) b.onclick = function() { copyText(nasDir000); };
-  b = $('btn000OpenLocal'); if (b) b.onclick = function() { api.post('/api/open-explorer', { path: localDir000 }); };
-  b = $('btn000OpenNas'); if (b) b.onclick = function() { api.post('/api/open-explorer', { path: nasDir000 }); };
-}
-
-// ==================== 异步日志逐条显示 ====================
-async function logResults(results, prefix) {
-  for (var i = 0; i < results.length; i++) {
-    var r = results[i];
-    addLog((r.success ? '✓' : '✗') + ' ' + (prefix || '') + (r.file || r.name || '?'));
-    await new Promise(function(resolve) { setTimeout(resolve, 30); });
-  }
+  b = $('btn000CopyPath'); if (b) b.onclick = () => copyText(nasDir000);
+  b = $('btn000OpenLocal'); if (b) b.onclick = () => api.post('/api/open-explorer', { path: localDir000 });
+  b = $('btn000OpenNas'); if (b) b.onclick = () => api.post('/api/open-explorer', { path: nasDir000 });
 }
 
 // ==================== 检测 ====================
+async function checkNasStatus() {
+  const el = $('nasStatus'); if (!el) return;
+  if (sel < 0 || !projects[sel].nasDir) { el.innerHTML = ''; return; }
+  el.innerHTML = ' 检测中...';
+  try {
+    const r = await api.get('/api/projects/' + sel + '/check-nas');
+    if (r.accessible) el.innerHTML = '<span style="color:#22c55e">✓ 可访问</span>';
+    else el.innerHTML = '<span style="color:#ef4444">✗ ' + esc(r.error || '不可访问') + '</span>';
+  } catch { el.innerHTML = '<span style="color:#ef4444">✗ 检测失败</span>'; }
+}
+
 async function refreshDetail() {
   if (sel < 0) return;
+  checkNasStatus();
   try {
-    var kw = $('keywordInput').value || '项目归档资料';
-  resolved = await api.get('/api/projects/' + sel + '/detect?keyword=' + encodeURIComponent(kw));
-  var dl = $('detectLocal'), dn = $('detectNas'), ds = $('detectSummary');
-  if (!resolved.relPath) { dl.textContent = '未找到含"' + kw + '"的子目录'; dn.textContent = ''; ds.textContent = ''; }
-  else {
-    dl.innerHTML = esc(resolved.localEpDir) + ' <span style="color:' + (resolved.localExists ? '#22c55e' : '#ef4444') + '">[' + (resolved.localExists ? resolved.localCount + ' 个文件' : '不存在') + ']</span>';
-    dn.innerHTML = esc(resolved.nasEpDir) + ' <span style="color:' + (resolved.nasExists ? '#22c55e' : '#94a3b8') + '">[' + (resolved.nasExists ? resolved.nasCount + ' 个文件' : '不存在') + ']</span>';
-    var d = resolved.localCount - resolved.nasCount;
-    if (d > 0) ds.innerHTML = '<span style="color:#f59e0b">⚠ 本地比NAS多 ' + d + ' 个文件</span>';
-    else if (resolved.localExists && resolved.nasExists) ds.innerHTML = '<span style="color:#22c55e">✓ 文件一致</span>';
-  }
-  refreshPending();
-  } catch(e) { var x = $('detectLocal'); if (x) x.textContent = '检测失败'; }
+    const kw = $('keywordInput').value || '项目归档资料';
+    resolved = await api.get('/api/projects/' + sel + '/detect?keyword=' + encodeURIComponent(kw));
+    const dl = $('detectLocal'), dn = $('detectNas'), ds = $('detectSummary');
+    if (!resolved.relPath) {
+      dl.textContent = '未找到含"' + kw + '"的子目录'; dn.textContent = ''; ds.textContent = '';
+    } else {
+      dl.innerHTML = esc(resolved.localEpDir) + ' <span style="color:' + (resolved.localExists ? '#22c55e' : '#ef4444') + '">[' + (resolved.localExists ? resolved.localCount + ' 个文件' : '不存在') + ']</span>';
+      dn.innerHTML = esc(resolved.nasEpDir) + ' <span style="color:' + (resolved.nasExists ? '#22c55e' : '#94a3b8') + '">[' + (resolved.nasExists ? resolved.nasCount + ' 个文件' : '不存在') + ']</span>';
+      const d = resolved.localCount - resolved.nasCount;
+      if (d > 0) ds.innerHTML = '<span style="color:#f59e0b">⚠ 本地比NAS多 ' + d + ' 个文件</span>';
+      else if (resolved.localExists && resolved.nasExists) ds.innerHTML = '<span style="color:#22c55e">✓ 文件一致</span>';
+    }
+    refreshPending();
+  } catch (e) { const x = $('detectLocal'); if (x) x.textContent = '检测失败'; }
 }
 
 async function refreshPending() {
-  var list = $('pendingList'); if (!list) return;
+  const list = $('pendingList'); if (!list) return;
   list.innerHTML = '';
   if (!resolved || !resolved.relPath || !resolved.localExists) return;
-  var data = await api.get('/api/projects/' + sel + '/pending?keyword=' + encodeURIComponent($('keywordInput').value || '项目归档资料'));
-  var files = data.files || [];
+  const data = await api.get('/api/projects/' + sel + '/pending?keyword=' + encodeURIComponent($('keywordInput').value || '项目归档资料'));
+  const files = data.files || [];
   $('pendingCount').textContent = files.length + ' 个';
-  if (files.length === 0) { list.innerHTML = '<div class="empty">没有待交付文件</div>'; return; }
-  for (var i = 0; i < files.length; i++) {
-    var d = document.createElement('div'); d.className = 'pi';
-    d.innerHTML = '<input type="checkbox" checked><span>' + esc(files[i]) + '</span>'; list.appendChild(d);
+  if (!files.length) { list.innerHTML = '<div class="empty">没有待交付文件</div>'; return; }
+  for (const f of files) {
+    const d = document.createElement('div'); d.className = 'pi';
+    d.innerHTML = '<input type="checkbox" checked><span>' + esc(f) + '</span>'; list.appendChild(d);
   }
 }
 
 async function copyPending() {
-  var cbs = document.querySelectorAll('#pendingList input[type=checkbox]');
-  var files = []; for (var i = 0; i < cbs.length; i++) if (cbs[i].checked) files.push(cbs[i].nextElementSibling.textContent);
-  if (files.length === 0) { alert('请先勾选'); return; }
-  addLog('📤 开始复制 ' + files.length + ' 个文件...');
-  var ok = 0, fail = 0;
-  for (var i = 0; i < files.length; i++) {
-    var r = await api.post('/api/projects/' + sel + '/copy', { fileNames: [files[i]], keyword: $('keywordInput').value || '项目归档资料' });
-    if (r.ok > 0) { ok++; addLog('✓ ' + files[i]); } else { fail++; addLog('✗ ' + files[i]); }
-    setStatus('复制中：' + (i + 1) + '/' + files.length);
-  }
-  addLog('✅ 完成：' + ok + ' 成功 / ' + fail + ' 失败');
-  setStatus('复制完成：成功 ' + ok + ' 个');
-  refreshDetail();
+  const files = getCheckedNames('pendingList');
+  if (!files.length) { alert('请先勾选'); return; }
+  startProgress('复制文件', files.length);
+  try {
+    const r = await api.post('/api/projects/' + sel + '/copy', {
+      fileNames: files,
+      keyword: $('keywordInput').value || '项目归档资料'
+    });
+    await pollJob(r.jobId);
+    refreshDetail();
+  } catch (e) { addLog('✗ 复制请求失败: ' + e.message); finishProgress('error', e.message); }
 }
 
 // ==================== 修改交付 ====================
 async function refreshModify() {
   if (sel < 0) return;
   try {
-    var data = await api.get('/api/projects/' + sel + '/modify-batches?keyword=' + encodeURIComponent('上映单集版'));
-    var mi = $('modifyInfo'), ms = $('modifySummary'), ml = $('modifyList'), mc = $('modifyCount');
+    const data = await api.get('/api/projects/' + sel + '/modify-batches?keyword=' + encodeURIComponent('上映单集版'));
+    const mi = $('modifyInfo'), ms = $('modifySummary'), ml = $('modifyList'), mc = $('modifyCount');
     if (!mi) return;
     if (!data.found) { mi.textContent = '未找到"上映单集版"目录'; return; }
     mi.textContent = '本地: ' + data.localKwDir + '\nNAS: ' + data.nasKwDir;
-    var batches = data.batches || [], nc = 0;
+    const batches = data.batches || [];
+    let nc = 0;
     ml.innerHTML = '';
-    for (var i = 0; i < batches.length; i++) {
-      var b = batches[i];
-      var d = document.createElement('div'); d.className = 'pi';
-      var chk = checkedModify[b.name] ? true : !b.nasExists;
+    for (const b of batches) {
+      const d = document.createElement('div'); d.className = 'pi';
+      const chk = checkedModify[b.name] ? true : !b.nasExists;
       d.innerHTML = '<input type="checkbox" ' + (chk ? 'checked' : '') + '><span>' + esc(b.name) + ' (' + b.localFileCount + '个) ' + (b.nasExists ? '[已交付]' : '[待交付]') + '</span>';
       ml.appendChild(d);
       if (!b.nasExists) nc++;
@@ -214,35 +333,30 @@ async function refreshModify() {
     ms.innerHTML = nc > 0 ? '<span style="color:#f59e0b">' + nc + ' 个批次待交付</span>' : '<span style="color:#22c55e">全部已交付</span>';
     nasDirModify = data.nasKwDir || '';
     localDirModify = data.localKwDir || '';
-  } catch(e) { ($('modifyInfo')||{}).textContent = '检测失败: ' + e.message; }
+  } catch (e) { const el = $('modifyInfo'); if (el) el.textContent = '检测失败: ' + e.message; }
 }
 
 async function copyModifyBatches() {
-  var cbs = document.querySelectorAll('#modifyList input[type=checkbox]');
-  var names = []; for (var i = 0; i < cbs.length; i++) if (cbs[i].checked) names.push(cbs[i].nextElementSibling.textContent.split(' (')[0]);
-  if (names.length === 0) { alert('请先勾选'); return; }
-  // 记住勾选状态
-  for (var i = 0; i < names.length; i++) checkedModify[names[i]] = true;
-  addLog('📤 开始复制 ' + names.length + ' 个批次...');
-  var ok = 0, fail = 0;
-  for (var i = 0; i < names.length; i++) {
-    var r = await api.post('/api/projects/' + sel + '/modify-copy-batch', { batchNames: [names[i]], keyword: '上映单集版' });
-    if (r.ok > 0) { ok++; addLog('✓ ' + names[i]); } else { fail++; addLog('✗ ' + names[i]); }
-    setStatus('复制中：' + (i + 1) + '/' + names.length);
-  }
-  addLog('✅ 完成：' + ok + ' 成功 / ' + fail + ' 失败');
-  setStatus('完成：' + (r.ok||0) + ' 成功');
-  refreshModify();
+  const names = getCheckedNames('modifyList');
+  if (!names.length) { alert('请先勾选'); return; }
+  for (const n of names) checkedModify[n] = true;
+  startProgress('上映单集版交付', names.length);
+  try {
+    const r = await api.post('/api/projects/' + sel + '/modify-copy-batch', { batchNames: names, keyword: '上映单集版' });
+    await pollJob(r.jobId);
+    refreshModify();
+  } catch (e) { addLog('✗ 批量复制失败: ' + e.message); finishProgress('error', e.message); }
 }
 
 // ==================== 弹窗：项目 ====================
 function showProjectDlg(editIdx) {
-  var p = editIdx >= 0 ? projects[editIdx] : { name: '', localDir: '', nasDir: '', status: 'editing' };
-  var h = '<div class="fg"><label>项目名称</label><input id="dlgName" value="' + escAttr(p.name) + '"></div>';
+  const p = editIdx >= 0 ? projects[editIdx] : { name: '', localDir: '', nasDir: '', memo: '', status: 'editing' };
+  const s = p.status || 'editing';
+  let h = '<div class="fg"><label>项目名称</label><input id="dlgName" value="' + escAttr(p.name) + '"></div>';
   h += '<div class="fg"><label>本地根目录</label><div class="ir"><input id="dlgLocal" value="' + escAttr(p.localDir) + '"><button class="btn btn-sm btn-outline" onclick="pickFolder(\'dlgLocal\')">浏览</button></div></div>';
   h += '<div class="fg"><label>NAS根目录</label><div class="ir"><input id="dlgNas" value="' + escAttr(p.nasDir) + '"><button class="btn btn-sm btn-outline" onclick="pickFolder(\'dlgNas\')">浏览</button></div></div>';
-  var s = p.status || 'editing';
-  h += '<div class="fg"><label>状态</label><select id="dlgStatus"><option value="editing"' + (s==='editing'?' selected':'') + '>🔵 剪辑中</option><option value="modifying"' + (s==='modifying'?' selected':'') + '>🟠 修改中</option><option value="done"' + (s==='done'?' selected':'') + '>✅ 已完成</option></select></div>';
+  h += '<div class="fg"><label>备注</label><textarea id="dlgMemo" style="width:100%;height:60px;border:1px solid #e2e8f0;border-radius:7px;padding:8px 12px;font-size:13px;outline:none;resize:vertical" placeholder="添加备注信息...">' + esc(p.memo || '') + '</textarea></div>';
+  h += '<div class="fg"><label>状态</label><select id="dlgStatus"><option value="editing"' + (s === 'editing' ? ' selected' : '') + '>🔵 剪辑中</option><option value="modifying"' + (s === 'modifying' ? ' selected' : '') + '>🟠 修改中</option><option value="done"' + (s === 'done' ? ' selected' : '') + '>✅ 已完成</option></select></div>';
   h += '<div class="modal-btns"><button class="btn btn-primary" onclick="saveProject(' + editIdx + ')">保存</button><button class="btn btn-outline" onclick="closeModal()">取消</button></div>';
   $('modalTitle').textContent = editIdx >= 0 ? '编辑项目' : '新建项目';
   $('modalBody').innerHTML = h;
@@ -250,7 +364,13 @@ function showProjectDlg(editIdx) {
 }
 
 async function saveProject(editIdx) {
-  var data = { name: $('dlgName').value.trim(), localDir: $('dlgLocal').value.trim(), nasDir: $('dlgNas').value.trim(), status: $('dlgStatus').value };
+  const data = {
+    name: $('dlgName').value.trim(),
+    localDir: $('dlgLocal').value.trim(),
+    nasDir: $('dlgNas').value.trim(),
+    memo: $('dlgMemo') ? $('dlgMemo').value.trim() : '',
+    status: $('dlgStatus').value
+  };
   if (!data.name) { alert('请输入名称'); return; }
   if (editIdx >= 0) await api.put('/api/projects/' + editIdx, data);
   else await api.post('/api/projects', data);
@@ -258,11 +378,18 @@ async function saveProject(editIdx) {
   renderProjectList(); selectProject(editIdx >= 0 ? editIdx : projects.length - 1);
 }
 
-async function delProject() { if (sel < 0) return; if (!confirm('确定删除「' + projects[sel].name + '」？')) return; await api.del('/api/projects/' + sel); projects = await api.get('/api/projects'); if (sel >= projects.length) sel = projects.length - 1; renderProjectList(); selectProject(sel); }
+async function delProject() {
+  if (sel < 0) return;
+  if (!confirm('确定删除「' + projects[sel].name + '」？')) return;
+  await api.del('/api/projects/' + sel);
+  projects = await api.get('/api/projects');
+  if (sel >= projects.length) sel = projects.length - 1;
+  renderProjectList(); selectProject(sel);
+}
 
 // ==================== 弹窗：批量导入 ====================
 function showImportDlg() {
-  var h = '<div class="fg"><label>本地根目录（从地址栏复制）</label><input id="dlgImportRoot"></div>';
+  let h = '<div class="fg"><label>本地根目录（从地址栏复制）</label><input id="dlgImportRoot"></div>';
   h += '<div class="fg"><label>部门模板</label><div id="dlgTplList"></div><button class="btn btn-sm btn-outline" onclick="addTpl()">+ 添加</button></div>';
   h += '<div style="margin:8px 0"><button class="btn btn-primary" onclick="doScan()">扫描子文件夹</button> <span id="dlgScanInfo" style="color:#94a3b8;font-size:12px"></span></div>';
   h += '<div id="dlgScanResult" style="max-height:260px;overflow:auto"></div>';
@@ -270,41 +397,44 @@ function showImportDlg() {
   $('modalTitle').textContent = '批量导入项目';
   $('modalBody').innerHTML = h;
   $('modalOverlay').style.display = 'flex';
-  for (var i = 0; i < (settings.templates || []).length; i++) addTplRow(settings.templates[i].name, settings.templates[i].path, i);
+  const tpls = settings.templates || [];
+  for (let i = 0; i < tpls.length; i++) addTplRow(tpls[i].name, tpls[i].path, i);
 }
 
 window._tplIdx = 0;
 function addTpl() { addTplRow('', '', window._tplIdx++); }
-function addTplRow(name, path, idx) {
-  var c = $('dlgTplList'), d = document.createElement('div'); d.className = 'ir'; d.style.marginBottom = '4px';
-  d.innerHTML = '<input class="tpl-name" value="' + escAttr(name) + '" placeholder="部门名" style="width:80px"><input class="tpl-path" value="' + escAttr(path) + '" placeholder="NAS路径" style="flex:1"><button class="btn btn-sm btn-outline" onclick="this.parentElement.remove()">X</button>';
+function addTplRow(name, pathVal, idx) {
+  const c = $('dlgTplList'), d = document.createElement('div'); d.className = 'ir'; d.style.marginBottom = '4px';
+  d.innerHTML = '<input class="tpl-name" value="' + escAttr(name) + '" placeholder="部门名" style="width:80px"><input class="tpl-path" value="' + escAttr(pathVal) + '" placeholder="NAS路径" style="flex:1"><button class="btn btn-sm btn-outline" onclick="this.parentElement.remove()">X</button>';
   c.appendChild(d);
 }
 
 async function doScan() {
   scanResults = []; $('dlgScanResult').innerHTML = '';
-  var root = $('dlgImportRoot').value.trim(); if (!root) { alert('请输入本地根目录'); return; }
+  const root = $('dlgImportRoot').value.trim(); if (!root) { alert('请输入本地根目录'); return; }
   // 保存模板
-  var ns = document.querySelectorAll('#dlgTplList .tpl-name'), ps = document.querySelectorAll('#dlgTplList .tpl-path');
-  var tpls = []; for (var i = 0; i < ns.length; i++) tpls.push({ name: ns[i].value.trim(), path: ps[i].value.trim() });
+  const ns = document.querySelectorAll('#dlgTplList .tpl-name'), ps = document.querySelectorAll('#dlgTplList .tpl-path');
+  const tpls = []; for (let i = 0; i < ns.length; i++) tpls.push({ name: ns[i].value.trim(), path: ps[i].value.trim() });
   await api.put('/api/import/templates', { templates: tpls }); settings.templates = tpls;
   // 扫描
-  var r = await api.post('/api/import/scan', { localRoot: root });
+  const r = await api.post('/api/import/scan', { localRoot: root });
   if (r.error) { alert(r.error); return; }
   scanResults = r.candidates || [];
   $('dlgScanInfo').textContent = '可导入 ' + scanResults.length + ' 个';
-  for (var i = 0; i < scanResults.length; i++) {
-    var d = document.createElement('div'); d.className = 'pi';
-    d.innerHTML = '<input type="checkbox" checked><span>' + esc(scanResults[i].name) + ' <span style="color:#94a3b8;font-size:11px">' + esc(scanResults[i].localDir) + '</span></span>';
+  for (const sr of scanResults) {
+    const d = document.createElement('div'); d.className = 'pi';
+    d.innerHTML = '<input type="checkbox" checked><span>' + esc(sr.name) + ' <span style="color:#94a3b8;font-size:11px">' + esc(sr.localDir) + '</span></span>';
     $('dlgScanResult').appendChild(d);
   }
 }
 
 async function doImport() {
-  var cbs = document.querySelectorAll('#dlgScanResult input[type=checkbox]');
-  var items = []; for (var i = 0; i < scanResults.length && i < cbs.length; i++) if (cbs[i].checked) items.push({ name: scanResults[i].name, localDir: scanResults[i].localDir });
-  if (items.length === 0) { alert('请先勾选'); return; }
-  var r = await api.post('/api/import/batch', { items: items });
+  const items = []; const cbs = document.querySelectorAll('#dlgScanResult input[type=checkbox]');
+  for (let i = 0; i < scanResults.length && i < cbs.length; i++) {
+    if (cbs[i].checked) items.push({ name: scanResults[i].name, localDir: scanResults[i].localDir });
+  }
+  if (!items.length) { alert('请先勾选'); return; }
+  const r = await api.post('/api/import/batch', { items });
   if (r.success) { alert('成功导入 ' + r.added + ' 个'); closeModal(); projects = await api.get('/api/projects'); renderProjectList(); }
 }
 
@@ -312,85 +442,361 @@ async function doImport() {
 async function refresh000() {
   if (sel < 0) return;
   try {
-    var data = await api.get('/api/projects/' + sel + '/modify-batches?keyword=' + encodeURIComponent('000交付'));
-  var mi = $('info000'), ms = $('summary000'), ml = $('list000'), mc = $('count000');
-  if (!mi) return;
-  if (!data.found) { mi.textContent = '未找到"000交付"目录'; return; }
-  mi.textContent = '本地: ' + data.localKwDir + '\nNAS: ' + data.nasKwDir;
-  var batches = data.batches || [], nc = 0;
-  ml.innerHTML = '';
-  for (var i = 0; i < batches.length; i++) {
-    var b = batches[i];
-    var d = document.createElement('div'); d.className = 'pi';
-    var chk = checked000[b.name] ? true : !b.nasExists;
-    d.innerHTML = '<input type="checkbox" ' + (chk ? 'checked' : '') + '><span>' + esc(b.name) + ' (' + b.localFileCount + '个) ' + (b.nasExists ? '[已交付]' : '[待交付]') + '</span>';
-    ml.appendChild(d);
-    if (!b.nasExists) nc++;
-  }
-  mc.textContent = nc + ' 待交付';
-  ms.innerHTML = nc > 0 ? '<span style="color:#f59e0b">' + nc + ' 个文件夹待交付</span>' : '<span style="color:#22c55e">全部已交付</span>';
+    const data = await api.get('/api/projects/' + sel + '/modify-batches?keyword=' + encodeURIComponent('000交付'));
+    const mi = $('info000'), ms = $('summary000'), ml = $('list000'), mc = $('count000');
+    if (!mi) return;
+    if (!data.found) { mi.textContent = '未找到"000交付"目录'; return; }
+    mi.textContent = '本地: ' + data.localKwDir + '\nNAS: ' + data.nasKwDir;
+    const batches = data.batches || [];
+    let nc = 0;
+    ml.innerHTML = '';
+    for (const b of batches) {
+      const d = document.createElement('div'); d.className = 'pi';
+      const chk = checked000[b.name] ? true : !b.nasExists;
+      d.innerHTML = '<input type="checkbox" ' + (chk ? 'checked' : '') + '><span>' + esc(b.name) + ' (' + b.localFileCount + '个) ' + (b.nasExists ? '[已交付]' : '[待交付]') + '</span>';
+      ml.appendChild(d);
+      if (!b.nasExists) nc++;
+    }
+    mc.textContent = nc + ' 待交付';
+    ms.innerHTML = nc > 0 ? '<span style="color:#f59e0b">' + nc + ' 个文件夹待交付</span>' : '<span style="color:#22c55e">全部已交付</span>';
     nasDir000 = data.nasKwDir || '';
     localDir000 = data.localKwDir || '';
-  } catch(e) { ($('info000')||{}).textContent = '检测失败: ' + e.message; }
+  } catch (e) { const el = $('info000'); if (el) el.textContent = '检测失败: ' + e.message; }
 }
 
 async function copy000Delivery() {
-  var cbs = document.querySelectorAll('#list000 input[type=checkbox]');
-  var names = []; for (var i = 0; i < cbs.length; i++) if (cbs[i].checked) names.push(cbs[i].nextElementSibling.textContent.split(' (')[0]);
-  if (names.length === 0) { alert('请先勾选'); return; }
-  for (var i = 0; i < names.length; i++) checked000[names[i]] = true;
-  addLog('📤 开始复制 ' + names.length + ' 个文件夹...');
-  var ok = 0, fail = 0;
-  for (var i = 0; i < names.length; i++) {
-    var r = await api.post('/api/projects/' + sel + '/modify-copy-batch', { batchNames: [names[i]], keyword: '000交付' });
-    if (r.ok > 0) { ok++; addLog('✓ ' + names[i]); } else { fail++; addLog('✗ ' + names[i]); }
-    setStatus('复制中：' + (i + 1) + '/' + names.length);
-  }
-  addLog('✅ 完成：' + ok + ' 成功 / ' + fail + ' 失败');
-  if (ok > 0) { await api.put('/api/projects/' + sel + '/status', { status: 'done' }); addLog('📌 项目状态已更新为「已完成」'); }
-  setStatus('完成：' + ok + ' 成功');
-  refresh000();
+  const names = getCheckedNames('list000');
+  if (!names.length) { alert('请先勾选'); return; }
+  for (const n of names) checked000[n] = true;
+  startProgress('000交付', names.length);
+  try {
+    const r = await api.post('/api/projects/' + sel + '/modify-copy-batch', { batchNames: names, keyword: '000交付' });
+    await pollJob(r.jobId);
+    // 复制成功后改状态
+    const job = await api.get('/api/jobs/' + r.jobId);
+    if (job.completed > 0) {
+      await api.put('/api/projects/' + sel + '/status', { status: 'done' });
+      projects = await api.get('/api/projects');
+      renderProjectList();
+      addLog('📌 项目状态已更新为「已完成」');
+      toast('项目已移至「已完成」分组', 'success');
+    }
+    refresh000();
+  } catch (e) { addLog('✗ 000交付失败: ' + e.message); finishProgress('error', e.message); }
 }
 
-// ==================== 工具 ====================
-function closeModal() { $('modalOverlay').style.display = 'none'; }
-function setStatus(m) { $('statusText').textContent = m; }
-function addLog(msg) { var t = new Date().toLocaleTimeString(); var lc = $('logContent'); if (lc) lc.innerHTML += '<div>[' + t + '] ' + esc(msg) + '</div>'; var lp = $('logPanel'); if (lp) lp.scrollTop = lp.scrollHeight; }
-function esc(s) { var d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
-function escAttr(s) { return (s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-function checkAll(listId, checked) { var cbs = document.querySelectorAll('#' + listId + ' input[type=checkbox]'); for (var i = 0; i < cbs.length; i++) cbs[i].checked = checked; }
-function copyText(text) { navigator.clipboard.writeText(text).catch(function() {}); setStatus('已复制'); }
-async function pickFolder(inputId) {
-  var r = await api.post('/api/pick-folder', {});
-  if (r.success && r.path) { $('dlg' + inputId.replace('dlg','')) || $(inputId); var el = $(inputId); if (el) el.value = r.path; }
+// ==================== 进度条系统 ====================
+var _currentJobId = null;
+var _pollTimer = null;
+
+function startProgress(title, total) {
+  _currentJobId = null;
+  if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+  const panel = document.getElementById('progressPanel');
+  document.getElementById('progTitle').textContent = title;
+  document.getElementById('progFill').style.width = '0%';
+  document.getElementById('progStats').textContent = '0 / ' + total;
+  document.getElementById('progCurrent').textContent = '启动中...';
+  document.getElementById('progSpeed').textContent = '';
+  panel.classList.add('show');
 }
-function copyCheckedPaths(listId, baseDir) {
-  var cbs = document.querySelectorAll('#' + listId + ' input[type=checkbox]');
-  var paths = [];
-  for (var i = 0; i < cbs.length; i++) if (cbs[i].checked) {
-    var name = cbs[i].nextElementSibling.textContent.split(' (')[0];
-    paths.push(baseDir + '\\' + name);
+
+function updateProgressUI(job) {
+  const pct = job.totalItems > 0 ? Math.round(job.current / job.totalItems * 100) : 0;
+  document.getElementById('progFill').style.width = pct + '%';
+  document.getElementById('progStats').textContent = job.completed + ' ✓ / ' + job.totalItems + ' 总';
+  const item = job.currentItem || {};
+  const name = item.name || '';
+  document.getElementById('progCurrent').textContent = (job.current + '/' + job.totalItems) + (name ? ' ' + name : '');
+  if (job.elapsed && job.totalItems > 0) {
+    const rate = job.current > 0 ? (job.elapsed / job.current / 1000).toFixed(1) : 0;
+    document.getElementById('progSpeed').textContent = rate > 0 ? rate + '秒/个' : '';
   }
-  if (paths.length === 0) paths.push(baseDir);
+  if (job.status === 'done') {
+    document.getElementById('progTitle').textContent = '✅ 完成';
+    if (job.failed > 0) {
+      document.getElementById('progStats').textContent += ' | ' + job.failed + ' ✗';
+    }
+  } else if (job.status === 'cancelled') {
+    document.getElementById('progTitle').textContent = '⏸ 已取消';
+  }
+  if (job.failed > 0 && job.status === 'running') {
+    document.getElementById('progStats').style.color = '#d97706';
+  }
+}
+
+async function pollJob(jobId) {
+  _currentJobId = jobId;
+  if (_pollTimer) clearInterval(_pollTimer);
+
+  return new Promise(function(resolve, reject) {
+    _pollTimer = setInterval(async function() {
+      try {
+        const job = await api.get('/api/jobs/' + jobId);
+        updateProgressUI(job);
+
+        if (job.status === 'done') {
+          clearInterval(_pollTimer);
+          _pollTimer = null;
+          _currentJobId = null;
+          const skipped = job.skipped || 0;
+          addLog('✅ 完成：' + job.completed + ' 成功' + (skipped > 0 ? ' / ' + skipped + ' 跳过' : '') + ' / ' + job.failed + ' 失败');
+          setStatus('完成：成功 ' + job.completed);
+          setTimeout(function() { document.getElementById('progressPanel').classList.remove('show'); }, 2000);
+          resolve(job);
+        } else if (job.status === 'cancelled') {
+          clearInterval(_pollTimer);
+          _pollTimer = null;
+          _currentJobId = null;
+          addLog('⏸ 任务已取消');
+          setStatus('已取消');
+          setTimeout(function() { document.getElementById('progressPanel').classList.remove('show'); }, 1500);
+          resolve(job);
+        }
+      } catch (e) { /* 继续轮询 */ }
+    }, 500);
+  });
+}
+
+function finishProgress(status, msg) {
+  if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+  _currentJobId = null;
+  document.getElementById('progTitle').textContent = '❌ ' + (msg || '失败');
+  setTimeout(function() { document.getElementById('progressPanel').classList.remove('show'); }, 3000);
+}
+
+function cancelCurrentJob() {
+  if (!_currentJobId) return;
+  if (!confirm('确定要取消当前复制任务？\n已完成的部分不会被撤销。')) return;
+  api.post('/api/jobs/' + _currentJobId + '/cancel', {});
+  document.getElementById('progCurrent').textContent = '正在取消...';
+}
+
+function hideProgress() {
+  document.getElementById('progressPanel').classList.remove('show');
+  if (_currentJobId) toast('任务在后台继续运行，刷新页面会中断', 'warn');
+}
+
+// ==================== 刷新/切换警告 ====================
+window.addEventListener('beforeunload', function(e) {
+  if (_currentJobId) {
+    e.preventDefault();
+    e.returnValue = '有复制任务正在进行中！刷新或关闭页面会中断任务。';
+    return e.returnValue;
+  }
+});
+
+// selectProject 时检测后台任务
+var _origSelectProject = selectProject;
+selectProject = function(idx) {
+  if (_currentJobId && idx !== sel) {
+    if (!confirm('当前有复制任务正在进行中！\n切换项目不会中断后台任务，但进度面板将无法显示。\n确定要切换吗？')) return;
+  }
+  return _origSelectProject(idx);
+};
+
+// ==================== 交付历史 ====================
+async function refreshHistory() {
+  try {
+    const logs = await api.get('/api/delivery-log?limit=20');
+    const hc = $('historyContent'); if (!hc) return;
+    if (!logs.length) { hc.innerHTML = '<div style="color:#94a3b8;font-size:11px">暂无记录</div>'; return; }
+    hc.innerHTML = logs.map(l => {
+      const t = new Date(l.time).toLocaleString('zh-CN');
+      return '<div style="padding:2px 0;border-bottom:1px solid #f1f5f9;font-size:11px">' +
+        '<span style="color:#64748b">' + t + '</span> ' +
+        '<span style="color:#3b82f6">' + esc(l.projectName) + '</span> ' +
+        esc(l.action) + ' ' +
+        '<span style="color:' + (l.fail > 0 ? '#ef4444' : '#22c55e') + '">✓' + l.ok + '</span>' +
+        (l.fail > 0 ? ' <span style="color:#ef4444">✗' + l.fail + '</span>' : '') +
+        '</div>';
+    }).join('');
+  } catch { /* 静默处理 */ }
+}
+
+// ==================== 路径 / 文件夹操作 ====================
+async function pickFolder(inputId) {
+  const r = await api.post('/api/pick-folder', {});
+  if (r.success && r.path) { const el = $(inputId); if (el) el.value = r.path; }
+}
+
+function copyCheckedPaths(listId, baseDir) {
+  const names = getCheckedNames(listId);
+  const paths = names.length ? names.map(n => baseDir + '\\' + n) : [baseDir];
   copyText(paths.join('\n'));
 }
+
 function openCheckedDir(listId, baseDir) {
-  var cbs = document.querySelectorAll('#' + listId + ' input[type=checkbox]');
-  var dirs = [];
-  for (var i = 0; i < cbs.length; i++) if (cbs[i].checked) {
-    var name = cbs[i].nextElementSibling.textContent.split(' (')[0];
-    dirs.push(baseDir + '\\' + name);
+  const names = getCheckedNames(listId);
+  let dirs;
+  if (names.length) {
+    dirs = names.map(n => baseDir + '\\' + n);
+  } else if (baseDir) {
+    dirs = [baseDir];
+  } else {
+    return; // 无可用路径
   }
-  if (dirs.length === 0 && baseDir) dirs.push(baseDir);
-  for (var d = 0; d < dirs.length; d++) api.post('/api/open-explorer', { path: dirs[d] });
+  for (const d of dirs) {
+    if (d) api.post('/api/open-explorer', { path: d });
+  }
 }
 
 function copyDeliveryMsg() {
   if (sel < 0) return;
-  var path = (resolved && resolved.nasEpDir) || projects[sel].nasDir;
-  var cnt = (resolved && resolved.nasCount) || 0;
-  var d = new Date(), ds = d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate());
-  copyText('交付通知：\n项目：' + projects[sel].name + '\n路径：' + path + ' (' + cnt + ' 个)\n时间：' + ds);
+  const pathVal = (resolved && resolved.nasEpDir) || projects[sel].nasDir;
+  const cnt = (resolved && resolved.nasCount) || 0;
+  const d = new Date(), ds = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+  copyText('交付通知：\n项目：' + projects[sel].name + '\n路径：' + pathVal + ' (' + cnt + ' 个)\n时间：' + ds);
 }
-function pad(n) { return n < 10 ? '0' + n : n; }
-function applyKeyword() { settings.keyword = $('keywordInput').value; api.put('/api/settings', { keyword: settings.keyword }); refreshDetail(); }
+
+function applyKeyword() {
+  settings.keyword = $('keywordInput').value;
+  api.put('/api/settings', { keyword: settings.keyword });
+  refreshDetail();
+}
+
+// ==================== 服务状态 & 重启 ====================
+async function refreshServerStatus() {
+  var el = document.getElementById('serverIndicator');
+  if (!el) return;
+  try {
+    var r = await api.get('/api/server/status');
+    el.innerHTML = '<span style="color:#22c55e">🟢</span> 运行中'
+      + ' <span style="color:#94a3b8;font-size:10px">PID ' + r.pid + ' · ' + r.uptime + '</span>';
+    el.title = '启动时间: ' + r.startedAt + '\n端口: ' + r.port + '\n点击重启服务';
+    el.style.cursor = 'pointer';
+    el.onclick = restartServer;
+  } catch (e) {
+    el.innerHTML = '<span style="color:#ef4444">🔴</span> 离线';
+    el.title = '无法连接到服务';
+    el.style.cursor = 'default';
+    el.onclick = null;
+  }
+}
+
+async function restartServer() {
+  if (!confirm('确定要重启服务？\n重启后页面将自动刷新，请等待约 3 秒。')) return;
+  try {
+    var r = await api.post('/api/server/restart', {});
+    toast(r.message || '服务重启中...', 'warn');
+    // 轮询等待服务恢复
+    var attempts = 0;
+    var check = setInterval(function() {
+      attempts++;
+      document.getElementById('serverIndicator').innerHTML = '<span style="color:#f59e0b">🟡</span> 重启中 ' + attempts + '...';
+      fetch('/api/server/status').then(function(res) {
+        if (res.ok) { clearInterval(check); location.reload(); }
+      }).catch(function() {});
+      if (attempts > 15) { clearInterval(check); document.getElementById('serverIndicator').innerHTML = '<span style="color:#ef4444">🔴</span> 重启超时'; }
+    }, 1000);
+  } catch (e) { toast('重启失败: ' + e.message, 'error'); }
+}
+
+// 每 30 秒刷新一次服务状态
+setInterval(refreshServerStatus, 30000);
+
+// ==================== Toast 通知（替换 alert） ====================
+function toast(msg, type) {
+  type = type || 'info';
+  const container = document.getElementById('toastContainer');
+  const el = document.createElement('div');
+  el.className = 'toast ' + type;
+  const icons = { info: '💬', warn: '⚠️', error: '❌', success: '✅' };
+  el.textContent = (icons[type] || '') + ' ' + msg;
+  container.appendChild(el);
+  setTimeout(function() { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; setTimeout(function() { el.remove(); }, 300); }, 3000);
+}
+
+// 覆盖全局 alert 为 toast（非阻断式）
+window.alert = function(m) { toast(m, 'warn'); };
+
+// ==================== 暗色主题 ====================
+(function() {
+  var saved = localStorage.getItem('pam-theme');
+  if (saved === 'dark') document.body.classList.add('dark');
+  var btn = document.getElementById('themeToggle');
+  if (btn) btn.textContent = saved === 'dark' ? '☀️' : '🌙';
+})();
+function toggleTheme() {
+  var isDark = document.body.classList.toggle('dark');
+  localStorage.setItem('pam-theme', isDark ? 'dark' : 'light');
+  var btn = document.getElementById('themeToggle');
+  if (btn) btn.textContent = isDark ? '☀️' : '🌙';
+}
+
+// ==================== 导出/导入配置备份 ====================
+async function exportBackup() {
+  try {
+    const res = await fetch('/api/export/backup');
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const d = new Date();
+    a.download = '项目档案管理器备份_' + d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + '.json';
+    a.click();
+    URL.revokeObjectURL(url);
+    toast('备份已导出', 'success');
+  } catch (e) { toast('导出失败: ' + e.message, 'error'); }
+}
+
+async function importBackup(input) {
+  const file = input.files[0];
+  if (!file) return;
+  if (!confirm('确定要导入备份数据？不会覆盖已存在的同名项目。')) return;
+  try {
+    const text = await file.text();
+    const data = JSON.parse(text);
+    if (!data.projects) { toast('无效的备份文件', 'error'); return; }
+    const r = await api.post('/api/import/backup', { projects: data.projects, settings: data.settings });
+    if (r.success) {
+      projects = await api.get('/api/projects');
+      settings = await api.get('/api/settings');
+      renderProjectList();
+      toast('成功导入 ' + r.added + ' 个项目（共 ' + r.total + ' 个）', 'success');
+    }
+  } catch (e) { toast('导入失败: ' + e.message, 'error'); }
+  input.value = '';
+}
+
+// ==================== 键盘快捷键 ====================
+document.addEventListener('keydown', function(e) {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+  if (e.ctrlKey || e.metaKey) {
+    if (e.key === 'n' || e.key === 'N') { e.preventDefault(); showProjectDlg(-1); }
+    else if (e.key === 'f' || e.key === 'F') { e.preventDefault(); var s = document.getElementById('searchInput'); if (s) s.focus(); }
+  }
+  if (e.key === 'F5') { e.preventDefault(); if (sel >= 0) { refreshDetail(); refreshModify(); refresh000(); refreshHistory(); } }
+  if (e.key === 'Delete' && sel >= 0) { e.preventDefault(); delProject(); }
+  if (e.key === 'Escape') { e.preventDefault(); closeModal(); }
+});
+
+// ==================== 请求超时封装 (30秒) ====================
+var _apiFetch = async function(url, options) {
+  options = options || {};
+  var controller = new AbortController();
+  var timeout = setTimeout(function() { controller.abort(); }, 30000);
+  try {
+    var res = await fetch(url, Object.assign({}, options, { signal: controller.signal }));
+    return await res.json();
+  } catch (e) {
+    if (e.name === 'AbortError') throw new Error('请求超时（30秒）');
+    throw e;
+  } finally {
+    clearTimeout(timeout);
+  }
+};
+api.get = async function(u) { return _apiFetch(u); };
+api.post = async function(u, d) { return _apiFetch(u, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(d) }); };
+api.put = async function(u, d) { return _apiFetch(u, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(d) }); };
+api.del = async function(u) { return _apiFetch(u, { method: 'DELETE' }); };
+
+// ==================== 全局错误兜底 ====================
+window.addEventListener('error', function(e) {
+  console.error('JS错误:', e.message, e.filename, '行', e.lineno);
+  toast('发生错误: ' + e.message, 'error');
+});
+window.addEventListener('unhandledrejection', function(e) {
+  console.error('未处理Promise错误:', e.reason);
+  toast('操作失败: ' + (e.reason && e.reason.message || '未知错误'), 'error');
+});

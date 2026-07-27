@@ -9,8 +9,11 @@ body{font-family:-apple-system,"Microsoft YaHei",sans-serif;font-size:13px;backg
 /* 头部 */
 #header{height:52px;background:#fff;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between;padding:0 20px;flex-shrink:0;box-shadow:0 1px 4px rgba(0,0,0,.04)}
 #header .logo{font-size:17px;font-weight:700;color:#1e293b;letter-spacing:-.3px}
+#header .header-actions{display:flex;align-items:center;gap:6px}
 #header input{width:170px;height:32px;border:1px solid #e2e8f0;border-radius:6px;padding:0 12px;font-size:13px;outline:none;transition:border .2s}
 #header input:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.1)}
+#themeToggle{width:32px;height:32px;border:none;border-radius:6px;background:#f1f5f9;cursor:pointer;font-size:16px;transition:all .15s;display:flex;align-items:center;justify-content:center}
+#themeToggle:hover{background:#e2e8f0}
 
 /* 主体 */
 #main{display:flex;flex:1;overflow:hidden}
@@ -43,6 +46,23 @@ body{font-family:-apple-system,"Microsoft YaHei",sans-serif;font-size:13px;backg
 #projectList .item.editing .dot{background:#3b82f6;box-shadow:0 0 6px rgba(59,130,246,.4)}
 #projectList .item.modifying .dot{background:#f59e0b;box-shadow:0 0 6px rgba(245,158,11,.4)}
 #projectList .item.done .dot{background:#22c55e;box-shadow:0 0 6px rgba(34,197,94,.4)}
+
+/* 状态快速切换 */
+.item-status{position:relative;display:inline-flex;align-items:center;margin-right:4px;flex-shrink:0}
+.item-status .status-btn{width:22px;height:22px;border:none;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:10px;transition:all .15s;background:transparent;padding:0;opacity:.55}
+.item-status .status-btn:hover{opacity:1;transform:scale(1.2)}
+
+/* 状态浮动下拉（渲染在 body 层，用 position:fixed 避免被 sidebar overflow 裁切） */
+#statusDrop{display:none;position:fixed;z-index:9999;background:#fff;border-radius:8px;box-shadow:0 8px 30px rgba(0,0,0,.18),0 2px 6px rgba(0,0,0,.08);min-width:130px;overflow:hidden;animation:dropIn .12s ease}
+@keyframes dropIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
+#statusDrop.show{display:block}
+#statusDrop .so{padding:8px 14px;font-size:12px;cursor:pointer;white-space:nowrap;border:none;width:100%;text-align:left;background:#fff;color:#334155;transition:background .1s;display:flex;align-items:center;gap:6px}
+#statusDrop .so:hover{background:#f1f5f9}
+#statusDrop .so.sel{background:#eff6ff;color:#2563eb;font-weight:600}
+body.dark #statusDrop{background:#1e293b;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+body.dark #statusDrop .so{background:#1e293b;color:#cbd5e1}
+body.dark #statusDrop .so:hover{background:#334155}
+body.dark #statusDrop .so.sel{background:#1e3a5f;color:#60a5fa}
 
 .sidebar-btns{display:flex;flex-direction:column;gap:5px;padding:12px 12px;border-top:1px solid rgba(255,255,255,.05)}
 .sidebar-btns .sbtn{display:block;width:100%;padding:11px 0;border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:500;cursor:pointer;text-align:center;transition:all .2s;letter-spacing:.2px}
@@ -84,6 +104,23 @@ body{font-family:-apple-system,"Microsoft YaHei",sans-serif;font-size:13px;backg
 .btn-outline{background:#fff;color:#475569;border:1px solid #e2e8f0}.btn-outline:hover{background:#f8fafc}
 .btn-danger{background:#ef4444;color:#fff}.btn-danger:hover{background:#dc2626}
 
+/* 复制进度条 */
+#progressPanel{display:none;background:#fff;border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,.15);padding:16px 20px;position:fixed;bottom:24px;right:24px;z-index:1000;min-width:320px;max-width:420px;border:1px solid #e2e8f0}
+#progressPanel.show{display:block;animation:slideUp .2s ease}
+#progressPanel .prog-hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+#progressPanel .prog-hdr .title{font-weight:600;font-size:13px;color:#1e293b}
+#progressPanel .prog-hdr .close-btn{background:none;border:none;font-size:16px;cursor:pointer;color:#94a3b8;padding:0 2px;line-height:1}
+#progressPanel .prog-hdr .close-btn:hover{color:#ef4444}
+#progressPanel .prog-bar{height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden;margin-bottom:6px}
+#progressPanel .prog-bar .fill{height:100%;background:linear-gradient(90deg,#3b82f6,#2563eb);border-radius:3px;transition:width .3s ease;width:0%}
+#progressPanel .prog-stats{display:flex;justify-content:space-between;font-size:11px;color:#64748b;margin-bottom:6px}
+#progressPanel .prog-current{font-size:11px;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:6px}
+#progressPanel .prog-actions{display:flex;gap:6px}
+#progressPanel .prog-actions .btn{padding:4px 12px;font-size:11px}
+body.dark #progressPanel{background:#1e293b;border-color:#334155}
+body.dark #progressPanel .prog-hdr .title{color:#e2e8f0}
+body.dark #progressPanel .prog-bar{background:#334155}
+
 /* 状态栏 */
 #statusBar{height:28px;padding:0 16px;display:flex;align-items:center;background:#fff;border-top:1px solid #e2e8f0;font-size:11px;color:#94a3b8;flex-shrink:0;letter-spacing:.2px}
 
@@ -101,6 +138,33 @@ body{font-family:-apple-system,"Microsoft YaHei",sans-serif;font-size:13px;backg
 .ir{display:flex;gap:6px}.ir input{flex:1}
 
 ::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:3px}::-webkit-scrollbar-thumb:hover{background:#94a3b8}
+
+/* Toast */
+#toastContainer{position:fixed;top:16px;right:16px;z-index:9999;display:flex;flex-direction:column;gap:8px;pointer-events:none}
+.toast{background:#1e293b;color:#fff;padding:10px 16px;border-radius:8px;font-size:13px;box-shadow:0 8px 24px rgba(0,0,0,.2);animation:toastIn .25s ease;pointer-events:auto;max-width:360px;display:flex;align-items:center;gap:8px}
+.toast.warn{background:#f59e0b;color:#fff}.toast.error{background:#ef4444;color:#fff}.toast.success{background:#22c55e;color:#fff}
+@keyframes toastIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}
+
+/* 暗色主题 */
+body.dark{background:#0f172a;color:#e2e8f0}
+body.dark #header{background:#1e293b;border-color:#334155}
+body.dark #header .logo{color:#e2e8f0}
+body.dark #header input{background:#334155;border-color:#475569;color:#e2e8f0}
+body.dark #themeToggle{background:#334155}.body.dark #themeToggle:hover{background:#475569}
+body.dark .card{background:#1e293b;border-color:#334155;box-shadow:0 1px 3px rgba(0,0,0,.2)}
+body.dark .card-hdr{color:#e2e8f0;border-color:#334155}
+body.dark .info-row .val{color:#cbd5e1}
+body.dark .info-row .lbl{color:#94a3b8}
+body.dark .pending-list{border-color:#334155}
+body.dark .pending-list .pi{border-color:#334155}
+body.dark .pending-list .pi:hover{background:#1a2332}
+body.dark .btn-outline{background:#334155;color:#cbd5e1;border-color:#475569}
+body.dark .btn-outline:hover{background:#475569}
+body.dark #statusBar{background:#1e293b;border-color:#334155;color:#94a3b8}
+body.dark .modal-box{background:#1e293b;color:#e2e8f0}
+body.dark .modal-hdr{border-color:#334155}
+body.dark .fg label{color:#94a3b8}
+body.dark .fg input,.body.dark .fg select{background:#334155;border-color:#475569;color:#e2e8f0}
 </style>
 </head>
 <body>
@@ -108,8 +172,23 @@ body{font-family:-apple-system,"Microsoft YaHei",sans-serif;font-size:13px;backg
 <div id="header">
   <span class="logo">项目档案管理器</span>
   <div style="display:flex;align-items:center;gap:6px">
+    <span id="serverIndicator" style="font-size:11px;color:#94a3b8;display:flex;align-items:center;gap:4px;margin-right:8px" title="服务状态">🔌 检测中...</span>
     <input id="keywordInput" placeholder="识别关键字">
     <button class="btn btn-sm btn-primary" onclick="applyKeyword()">应用并扫描</button>
+    <button id="themeToggle" onclick="toggleTheme()" title="切换主题">🌙</button>
+  </div>
+</div>
+
+<div id="toastContainer"></div>
+<div id="statusDrop"></div>
+<div id="progressPanel">
+  <div class="prog-hdr"><span class="title" id="progTitle">复制中...</span><button class="close-btn" id="progClose" title="关闭面板" onclick="document.getElementById('progressPanel').classList.remove('show')">&times;</button></div>
+  <div class="prog-bar"><div class="fill" id="progFill"></div></div>
+  <div class="prog-stats"><span id="progStats">0/0</span><span id="progSpeed"></span></div>
+  <div class="prog-current" id="progCurrent">准备中...</div>
+  <div class="prog-actions">
+    <button class="btn btn-outline" id="progCancel" onclick="cancelCurrentJob()">⏸ 取消</button>
+    <button class="btn btn-sm btn-outline" onclick="hideProgress()">🔽 最小化</button>
   </div>
 </div>
 
@@ -135,6 +214,11 @@ body{font-family:-apple-system,"Microsoft YaHei",sans-serif;font-size:13px;backg
       <button class="sbtn sbtn-edit" onclick="if(sel>=0)showProjectDlg(sel)">编辑项目</button>
       <button class="sbtn sbtn-del" onclick="delProject()">删除项目</button>
       <button class="sbtn sbtn-import" onclick="showImportDlg()">批量导入</button>
+      <div style="display:flex;gap:5px">
+        <button class="sbtn" style="flex:1;background:#334155;font-size:11px;padding:8px 0" onclick="exportBackup()">📥 导出备份</button>
+        <button class="sbtn" style="flex:1;background:#334155;font-size:11px;padding:8px 0" onclick="document.getElementById('importFileInput').click()">📤 导入备份</button>
+      </div>
+      <input type="file" id="importFileInput" accept=".json" style="display:none" onchange="importBackup(this)">
     </div>
   </div>
   <div id="splitter"></div>
