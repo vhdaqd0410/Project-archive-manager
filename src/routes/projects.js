@@ -20,7 +20,8 @@ router.post('/', (req, res) => {
     localDir: (localDir || '').trim(),
     nasDir: (nasDir || '').trim(),
     memo: (memo || '').trim(),
-    status: 'editing'
+    status: 'editing',
+    createdAt: new Date().toISOString()
   };
   shared.projects.push(p); projectService.saveProjects(shared.projects);
   res.json({ success: true, project: p });

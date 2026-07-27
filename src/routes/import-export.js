@@ -27,7 +27,7 @@ router.post('/batch', (req, res) => {
   for (const item of items) {
     if (!item.name || !item.localDir) continue;
     if (shared.projects.some(p => p.name === item.name)) continue;
-    shared.projects.push({ id: crypto.randomUUID(), name: item.name.trim(), localDir: item.localDir.trim(), nasDir: (item.nasDir || '').trim(), status: 'editing' });
+    shared.projects.push({ id: crypto.randomUUID(), name: item.name.trim(), localDir: item.localDir.trim(), nasDir: (item.nasDir || '').trim(), status: 'editing', createdAt: new Date().toISOString() });
     added.push(item);
   }
   projectService.saveProjects(shared.projects);

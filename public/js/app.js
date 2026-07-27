@@ -132,6 +132,32 @@ async function setProjectStatus(idx, status) {
   toast('状态已更新', 'success');
 }
 
+// ==================== 右键菜单 ====================
+function showContextMenu(e, idx) {
+  selectProject(idx);
+  var drop = document.getElementById('statusDrop');
+  var p = projects[idx];
+  drop.innerHTML = '';
+  var actions = [
+    { label: '✏️ 编辑项目', action: function() { showProjectDlg(idx); } },
+    { label: '🗑 删除项目', action: function() { delProject(); } },
+    { label: '📂 打开本地目录', action: function() { api.post('/api/open-explorer', { path: p.localDir }); } },
+    { label: '📂 打开NAS目录', action: function() { api.post('/api/open-explorer', { path: p.nasDir }); } },
+    { label: '📋 复制NAS路径', action: function() { copyText(p.nasDir); } },
+    { label: '📋 复制交付信息', action: function() { selectProject(idx); setTimeout(copyDeliveryMsg, 100); } }
+  ];
+  for (var i = 0; i < actions.length; i++) {
+    var o = document.createElement('div');
+    o.className = 'so';
+    o.textContent = actions[i].label;
+    o.onclick = (function(fn) { return function(ev) { ev.stopPropagation(); drop.classList.remove('show'); fn(); }; })(actions[i].action);
+    drop.appendChild(o);
+  }
+  drop.style.left = e.clientX + 'px';
+  drop.style.top = e.clientY + 'px';
+  drop.classList.add('show');
+}
+
 // 点击其他地方关闭状态下拉 + 滚动/缩放时关闭
 document.addEventListener('click', function(e) {
   if (!e.target.closest('.item-status')) {
@@ -145,24 +171,55 @@ window.addEventListener('resize', function() {
   document.getElementById('statusDrop').classList.remove('show');
 });
 
-// ==================== 项目列表 ====================
+// ==================== 搜索防抖 ====================
+var _searchTimer = null;
+function debounceSearch() {
+  if (_searchTimer) clearTimeout(_searchTimer);
+  _searchTimer = setTimeout(function() { renderProjectList(); }, 200);
+}
+
+// ==================== 排序切换 ====================
+var _sortBy = 'time'; // 'time' | 'name'
+function toggleSort() {
+  _sortBy = _sortBy === 'time' ? 'name' : 'time';
+  var btn = document.getElementById('sortBtn');
+  if (btn) btn.textContent = _sortBy === 'time' ? '🕐' : '🔤';
+  renderProjectList();
+}
+
 function renderProjectList() {
   const list = $('projectList'), search = ($('searchInput').value || '').toLowerCase();
   list.innerHTML = '';
+
+  // 排序：按创建时间或名称
+  const sorted = projects.map(function(p, i) { return { p: p, i: i }; });
+  if (_sortBy === 'time') {
+    sorted.sort(function(a, b) { return (b.p.createdAt || '').localeCompare(a.p.createdAt || ''); });
+  } else {
+    sorted.sort(function(a, b) { return a.p.name.localeCompare(b.p.name); });
+  }
+
   const groups = { editing: [], modifying: [], done: [] };
-  for (let i = 0; i < projects.length; i++) {
-    const p = projects[i];
-    if (search && p.name.toLowerCase().indexOf(search) < 0) continue;
-    const g = p.status === 'done' ? 'done' : p.status === 'modifying' ? 'modifying' : 'editing';
-    groups[g].push(i);
+  for (const item of sorted) {
+    if (search && item.p.name.toLowerCase().indexOf(search) < 0) continue;
+    const g = item.p.status === 'done' ? 'done' : item.p.status === 'modifying' ? 'modifying' : 'editing';
+    groups[g].push(item.i);
   }
   const groupConfig = [
     { label: '🔵 剪辑中', key: 'editing' },
     { label: '🟠 修改中', key: 'modifying' },
     { label: '✅ 已完成', key: 'done' }
   ];
-  for (const cfg of groupConfig) renderGroup(list, cfg, groups[cfg.key], search);
+  var total = 0, doneTotal = 0;
+  for (const cfg of groupConfig) {
+    renderGroup(list, cfg, groups[cfg.key]);
+    total += groups[cfg.key].length;
+    if (cfg.key === 'done') doneTotal = groups[cfg.key].length;
+  }
   $('projectCount').textContent = projects.length;
+  // 更新统计
+  var statEl = document.getElementById('projectStats');
+  if (statEl) statEl.textContent = '共 ' + total + ' 个 · ' + doneTotal + ' 已完成';
 }
 
 function renderGroup(list, cfg, indices) {
@@ -190,6 +247,10 @@ function renderGroup(list, cfg, indices) {
       + '</span>'
       + esc(p.name);
     d.onclick = (function(i) { return function() { selectProject(i); }; })(idx);
+    // 右键菜单
+    d.addEventListener('contextmenu', (function(i) {
+      return function(e) { e.preventDefault(); showContextMenu(e, i); };
+    })(idx));
     list.appendChild(d);
   }
   refreshGroupItems(h);
@@ -517,21 +578,28 @@ function updateProgressUI(job) {
   const item = job.currentItem || {};
   const name = item.name || '';
   document.getElementById('progCurrent').textContent = (job.current + '/' + job.totalItems) + (name ? ' ' + name : '');
-  if (job.elapsed && job.totalItems > 0) {
+
+  // 速率：优先显示 MB/s，其次秒/个
+  var speedText = '';
+  if (job.elapsed && job.elapsed > 1000 && job.totalBytes > 0) {
+    const mb = job.totalBytes / 1024 / 1024;
+    const sec = job.elapsed / 1000;
+    speedText = (mb / sec).toFixed(1) + ' MB/s';
+  } else if (job.elapsed && job.totalItems > 0) {
     const rate = job.current > 0 ? (job.elapsed / job.current / 1000).toFixed(1) : 0;
-    document.getElementById('progSpeed').textContent = rate > 0 ? rate + '秒/个' : '';
+    speedText = rate > 0 ? rate + '秒/个' : '';
   }
+  document.getElementById('progSpeed').textContent = speedText;
+
+  // 状态文本
   if (job.status === 'done') {
     document.getElementById('progTitle').textContent = '✅ 完成';
     document.getElementById('jobIndicator').style.display = 'none';
-    if (job.failed > 0) {
-      document.getElementById('progStats').textContent += ' | ' + job.failed + ' ✗';
-    }
+    if (job.failed > 0) document.getElementById('progStats').textContent += ' | ' + job.failed + ' ✗';
   } else if (job.status === 'cancelled') {
     document.getElementById('progTitle').textContent = '⏸ 已取消';
     document.getElementById('jobIndicator').style.display = 'none';
   } else {
-    // 运行中：更新标题栏任务指示器
     document.getElementById('progTitle').textContent = '📁 ' + job.projectName + ' — ' + job.type;
     var jInd = document.getElementById('jobIndicator');
     jInd.style.display = 'flex';

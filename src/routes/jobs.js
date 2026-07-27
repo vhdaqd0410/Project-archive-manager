@@ -47,6 +47,7 @@ function mountJobRoutes(router) {
       totalItems: job.totalItems, current: job.current,
       completed: job.completed, failed: job.failed, skipped: job.skipped,
       status: job.status, nasDir: job.nasDir || '',
+      totalBytes: job.totalBytes || 0,
       currentItem: job.current <= job.totalItems ? (job.items[job.current - 1] || {}) : {},
       elapsed: job.startTime ? ((job.endTime || Date.now()) - job.startTime) : 0
     });
