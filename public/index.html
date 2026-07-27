@@ -150,7 +150,8 @@ body.dark{background:#0f172a;color:#e2e8f0}
 body.dark #header{background:#1e293b;border-color:#334155}
 body.dark #header .logo{color:#e2e8f0}
 body.dark #header input{background:#334155;border-color:#475569;color:#e2e8f0}
-body.dark #themeToggle{background:#334155}.body.dark #themeToggle:hover{background:#475569}
+body.dark #themeToggle{background:#334155}
+body.dark #themeToggle:hover{background:#475569}
 body.dark .card{background:#1e293b;border-color:#334155;box-shadow:0 1px 3px rgba(0,0,0,.2)}
 body.dark .card-hdr{color:#e2e8f0;border-color:#334155}
 body.dark .info-row .val{color:#cbd5e1}
@@ -164,7 +165,7 @@ body.dark #statusBar{background:#1e293b;border-color:#334155;color:#94a3b8}
 body.dark .modal-box{background:#1e293b;color:#e2e8f0}
 body.dark .modal-hdr{border-color:#334155}
 body.dark .fg label{color:#94a3b8}
-body.dark .fg input,.body.dark .fg select{background:#334155;border-color:#475569;color:#e2e8f0}
+body.dark .fg input,body.dark .fg select{background:#334155;border-color:#475569;color:#e2e8f0}
 </style>
 </head>
 <body>
@@ -173,6 +174,7 @@ body.dark .fg input,.body.dark .fg select{background:#334155;border-color:#47556
   <span class="logo">项目档案管理器</span>
   <div style="display:flex;align-items:center;gap:6px">
     <span id="serverIndicator" style="font-size:11px;color:#94a3b8;display:flex;align-items:center;gap:4px;margin-right:8px" title="服务状态">🔌 检测中...</span>
+    <span id="jobIndicator" style="display:none;font-size:11px;color:#f59e0b;display:none;align-items:center;gap:3px;margin-right:6px;cursor:pointer" title="点击显示进度面板" onclick="document.getElementById('progressPanel').classList.add('show')">⏳ <span id="jobIndicatorText">0/0</span></span>
     <input id="keywordInput" placeholder="识别关键字">
     <button class="btn btn-sm btn-primary" onclick="applyKeyword()">应用并扫描</button>
     <button id="themeToggle" onclick="toggleTheme()" title="切换主题">🌙</button>

@@ -256,41 +256,39 @@ router.post('/open-explorer', (req, res) => {
 router.post('/pick-folder', (req, res) => {
   try {
     const os = require('os');
+    const { spawnSync } = require('child_process');
     const baseName = 'pam_pf_' + Date.now();
     const vbsFile = path.join(os.tmpdir(), baseName + '.vbs');
     const resultFile = path.join(os.tmpdir(), baseName + '_r.txt');
 
-    const vbs = [
+    const vbsLines = [
       'Set sa = CreateObject("Shell.Application")',
       'Set f  = sa.BrowseForFolder(0, "Select Folder", 81, 0)',
       'If Not f Is Nothing Then',
       '  Set fs = CreateObject("Scripting.FileSystemObject")',
-      '  fs.CreateTextFile("' + resultFile.replace(/\\/g, '\\\\') + '", True).Write f.Self.Path',
+      '  fs.CreateTextFile("' + resultFile + '", True).Write f.Self.Path',
       'End If'
-    ].join('\r\n');
-    fs.writeFileSync(vbsFile, vbs, 'utf8');
+    ];
+    fs.writeFileSync(vbsFile, vbsLines.join('\r\n'), 'utf8');
 
-    // 独立启动：CMD 窗口最小化，wscript 的对话框有可见宿主不会闪退
-    execSync('start "PickFolder" /min cmd /c wscript.exe "' + vbsFile + '"', { timeout: 3000 });
+    // spawnSync 阻塞直到 wscript.exe 退出（用户关闭对话框）
+    spawnSync('wscript.exe', [vbsFile], {
+      timeout: 120000,
+      windowsHide: true
+    });
 
-    // 轮询结果
-    let tries = 0;
-    const poll = () => {
-      tries++;
-      if (fs.existsSync(resultFile)) {
-        const sel = fs.readFileSync(resultFile, 'utf8').trim();
-        try { fs.unlinkSync(resultFile); } catch(e) {}
-        try { fs.unlinkSync(vbsFile); } catch(e) {}
-        return res.json({ success: true, path: sel });
-      }
-      if (tries > 90) {
-        try { fs.unlinkSync(vbsFile); } catch(e) {}
-        return res.json({ success: false, path: '', error: '超时或未选择' });
-      }
-      setTimeout(poll, 1000);
-    };
-    setTimeout(poll, 500);
-  } catch(e) { res.json({ success: false, path: '', error: e.message }); }
+    // 读取结果
+    let selectedPath = '';
+    if (fs.existsSync(resultFile)) {
+      selectedPath = fs.readFileSync(resultFile, 'utf8').trim();
+      try { fs.unlinkSync(resultFile); } catch(e) {}
+    }
+    try { fs.unlinkSync(vbsFile); } catch(e) {}
+    res.json({ success: true, path: selectedPath });
+  } catch(e) {
+    // spawnSync 超时也走这里
+    res.json({ success: false, path: '', error: e.message || '对话框超时' });
+  }
 });
 
 // ==================== 批量导入 ====================

@@ -515,11 +515,20 @@ function updateProgressUI(job) {
   }
   if (job.status === 'done') {
     document.getElementById('progTitle').textContent = '✅ 完成';
+    document.getElementById('jobIndicator').style.display = 'none';
     if (job.failed > 0) {
       document.getElementById('progStats').textContent += ' | ' + job.failed + ' ✗';
     }
   } else if (job.status === 'cancelled') {
     document.getElementById('progTitle').textContent = '⏸ 已取消';
+    document.getElementById('jobIndicator').style.display = 'none';
+  } else {
+    // 运行中：更新标题栏任务指示器
+    document.getElementById('progTitle').textContent = '📁 ' + job.projectName + ' — ' + job.type;
+    var jInd = document.getElementById('jobIndicator');
+    jInd.style.display = 'flex';
+    document.getElementById('jobIndicatorText').textContent = job.current + '/' + job.totalItems;
+    jInd.title = '项目: ' + job.projectName + '\n任务: ' + job.type + '\n点击显示进度面板';
   }
   if (job.failed > 0 && job.status === 'running') {
     document.getElementById('progStats').style.color = '#d97706';
@@ -540,17 +549,21 @@ async function pollJob(jobId) {
           clearInterval(_pollTimer);
           _pollTimer = null;
           _currentJobId = null;
+          document.getElementById('jobIndicator').style.display = 'none';
           const skipped = job.skipped || 0;
           addLog('✅ 完成：' + job.completed + ' 成功' + (skipped > 0 ? ' / ' + skipped + ' 跳过' : '') + ' / ' + job.failed + ' 失败');
           setStatus('完成：成功 ' + job.completed);
+          updateProgressUI(Object.assign({}, job, { status: 'done' }));
           setTimeout(function() { document.getElementById('progressPanel').classList.remove('show'); }, 2000);
           resolve(job);
         } else if (job.status === 'cancelled') {
           clearInterval(_pollTimer);
           _pollTimer = null;
           _currentJobId = null;
+          document.getElementById('jobIndicator').style.display = 'none';
           addLog('⏸ 任务已取消');
           setStatus('已取消');
+          updateProgressUI(Object.assign({}, job, { status: 'cancelled' }));
           setTimeout(function() { document.getElementById('progressPanel').classList.remove('show'); }, 1500);
           resolve(job);
         }
@@ -562,6 +575,7 @@ async function pollJob(jobId) {
 function finishProgress(status, msg) {
   if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
   _currentJobId = null;
+  document.getElementById('jobIndicator').style.display = 'none';
   document.getElementById('progTitle').textContent = '❌ ' + (msg || '失败');
   setTimeout(function() { document.getElementById('progressPanel').classList.remove('show'); }, 3000);
 }
@@ -575,7 +589,10 @@ function cancelCurrentJob() {
 
 function hideProgress() {
   document.getElementById('progressPanel').classList.remove('show');
-  if (_currentJobId) toast('任务在后台继续运行，刷新页面会中断', 'warn');
+  if (_currentJobId) {
+    document.getElementById('jobIndicator').style.display = 'flex';
+    toast('任务在后台继续运行，点击标题栏 ⏳ 可查看进度', 'info');
+  }
 }
 
 // ==================== 刷新/切换警告 ====================
@@ -591,7 +608,7 @@ window.addEventListener('beforeunload', function(e) {
 var _origSelectProject = selectProject;
 selectProject = function(idx) {
   if (_currentJobId && idx !== sel) {
-    if (!confirm('当前有复制任务正在进行中！\n切换项目不会中断后台任务，但进度面板将无法显示。\n确定要切换吗？')) return;
+    if (!confirm('⏳ 后台任务正在进行中！\n\n切换项目不会中断后台复制任务，但右侧面板会变为新项目内容。\n点击标题栏的 ⏳ 指示器可以随时查看进度。\n\n确定要切换吗？')) return;
   }
   return _origSelectProject(idx);
 };
@@ -625,9 +642,12 @@ async function pickFolder(inputId) {
     const r = await api.post('/api/pick-folder', {});
     if (r.success && r.path) {
       const el = document.getElementById(inputId);
-      if (el) el.value = r.path;
+      if (el) { el.value = r.path; toast('已选择: ' + r.path, 'success'); }
+      else toast('未找到输入框: ' + inputId, 'error');
     } else if (r.error) {
       toast('选择失败: ' + r.error, 'error');
+    } else {
+      // r.success 为 true 但 path 为空 = 用户取消了
     }
   } catch (e) {
     toast('选择失败: ' + e.message, 'error');
