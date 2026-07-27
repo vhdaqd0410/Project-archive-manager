@@ -140,6 +140,7 @@ function showContextMenu(e, idx) {
   drop.innerHTML = '';
   var actions = [
     { label: '✏️ 编辑项目', action: function() { showProjectDlg(idx); } },
+    { label: '🎯 设置目标集数', action: function() { setEpisodeTarget(idx); } },
     { label: '🗑 删除项目', action: function() { delProject(); } },
     { label: '📂 打开本地目录', action: function() { api.post('/api/open-explorer', { path: p.localDir }); } },
     { label: '📂 打开NAS目录', action: function() { api.post('/api/open-explorer', { path: p.nasDir }); } },
@@ -278,14 +279,14 @@ function selectProject(idx) {
     '<div class="card"><div class="card-hdr">🎬 上映单集版 · 修改交付 <span id="modifyCount" style="margin-left:8px">0</span></div><div class="card-body"><div id="modifyInfo" style="font-size:11px;color:#94a3b8">检测中...</div><div id="modifySummary" style="font-size:12px;margin:4px 0"></div><div class="pending-list" id="modifyList"></div><div class="act-bar"><button class="btn btn-sm btn-primary" id="btnModOpenLocal">打开本地</button><button class="btn btn-sm btn-primary" id="btnModOpenNas">打开NAS</button><button class="btn btn-sm btn-outline" id="btnModRefresh">刷新</button><button class="btn btn-sm btn-outline" id="btnModCheckAll">全选</button><button class="btn btn-sm btn-outline" id="btnModUncheckAll">取消全选</button><button class="btn btn-sm btn-outline" id="btnModCopyPath">复制路径</button><button class="btn btn-sm btn-warn" id="btnModCopy">复制选中到NAS</button></div></div></div>' +
     '<div class="card"><div class="card-hdr">📦 000交付 <span id="count000" style="margin-left:8px">0</span></div><div class="card-body"><div id="info000" style="font-size:11px;color:#94a3b8">检测中...</div><div id="summary000" style="font-size:12px;margin:4px 0"></div><div class="pending-list" id="list000"></div><div class="act-bar"><button class="btn btn-sm btn-primary" id="btn000OpenLocal">打开本地</button><button class="btn btn-sm btn-primary" id="btn000OpenNas">打开NAS</button><button class="btn btn-sm btn-outline" id="btn000Refresh">刷新</button><button class="btn btn-sm btn-outline" id="btn000CheckAll">全选</button><button class="btn btn-sm btn-outline" id="btn000UncheckAll">取消全选</button><button class="btn btn-sm btn-outline" id="btn000CopyPath">复制路径</button><button class="btn btn-sm btn-warn" id="btn000Copy">复制选中到NAS</button></div></div></div>' +
     '<div class="card"><div class="card-hdr">📋 运行日志</div><div class="card-body" id="logPanel" style="max-height:200px;overflow-y:auto;font-family:Consolas,monospace;font-size:11px;color:#64748b;padding:8px 12px"><div id="logContent">就绪</div></div></div>' +
-    '<div class="card"><div class="card-hdr">� 集数监控 <span id="monitorBadge" style="margin-left:8px;font-size:11px"></span></div><div class="card-body" id="monitorBody" style="font-size:12px;color:#94a3b8">未设置目标集数</div></div>' +
+    '<div class="card"><div class="card-hdr">📊 集数监控 <span id="monitorBadge" style="margin-left:8px;font-size:11px"></span><button onclick="manualRefreshMonitor()" title="手动刷新" style="margin-left:auto;padding:1px 6px;border:1px solid #475569;border-radius:4px;background:transparent;color:#94a3b8;font-size:11px;cursor:pointer;float:right">🔄</button><button onclick="setEpisodeTarget(sel)" title="快速设置目标集数" style="margin-left:4px;padding:1px 8px;border:1px solid #475569;border-radius:4px;background:transparent;color:#94a3b8;font-size:11px;cursor:pointer;float:right">🎯 设置</button></div><div class="card-body" id="monitorBody" style="font-size:12px;color:#94a3b8">未设置目标集数</div></div>' +
     '<div class="card"><div class="card-hdr">📜 最近交付记录</div><div class="card-body" id="historyContent" style="max-height:180px;overflow-y:auto;padding:4px 8px">加载中...</div></div>';
   bindEvents();
   refreshDetail();
   refreshModify();
   refresh000();
   refreshHistory();
-  refreshMonitor();
+  startAutoMonitor();
 }
 
 function bindEvents() {
@@ -351,7 +352,17 @@ async function refreshPending() {
   if (!resolved || !resolved.relPath || !resolved.localExists) return;
   const data = await api.get('/api/projects/' + sel + '/pending?keyword=' + encodeURIComponent($('keywordInput').value || '项目归档资料'));
   const files = data.files || [];
-  $('pendingCount').textContent = files.length + ' 个';
+  var countLabel = files.length + ' 个';
+  // 顺便取 monitor 数据展示缺集信息
+  try {
+    const mon = await api.get('/api/projects/' + sel + '/monitor');
+    if (mon.archiveMissing && mon.archiveMissing.hasMissing) {
+      var ranges = mon.archiveMissing.ranges || [];
+      var tip = ranges.length <= 6 ? ranges.join(', ') : ranges.slice(0, 5).join(', ') + '…';
+      countLabel += ' <span style="color:#f97316;font-size:11px;font-weight:400">少' + mon.archiveMissing.missingCount + '集：' + tip + '</span>';
+    }
+  } catch(e) {}
+  $('pendingCount').innerHTML = countLabel;
   if (!files.length) { list.innerHTML = '<div class="empty">没有待交付文件</div>'; return; }
   for (const f of files) {
     const d = document.createElement('div'); d.className = 'pi';
@@ -453,6 +464,21 @@ async function delProject() {
   projects = await api.get('/api/projects');
   if (sel >= projects.length) sel = projects.length - 1;
   renderProjectList(); selectProject(sel);
+}
+
+// ==================== 快速设置目标集数 ====================
+async function setEpisodeTarget(idx) {
+  if (idx < 0 || idx >= projects.length) return;
+  var cur = projects[idx].episodeTarget || '';
+  var val = prompt('请输入目标集数（当前：' + (cur || '未设置') + '）\n设定后集数监控卡片将实时追踪交付进度', cur);
+  if (val === null) return;
+  var num = parseInt(val);
+  if (isNaN(num) || num < 0) { alert('请输入有效数字'); return; }
+  await api.put('/api/projects/' + idx, { episodeTarget: num, name: projects[idx].name });
+  projects = await api.get('/api/projects');
+  renderProjectList();
+  selectProject(idx);
+  toast('目标集数已设为 ' + num + ' 集', 'success');
 }
 
 // ==================== 弹窗：批量导入 ====================
@@ -559,102 +585,99 @@ async function copy000Delivery() {
   } catch (e) { addLog('✗ 000交付失败: ' + e.message); finishProgress('error', e.message); }
 }
 
-// ==================== 进度条系统 ====================
+// ==================== 进度条系统（实时文件级 + ETA + 多任务监控）====================
 var _currentJobId = null;
 var _pollTimer = null;
+var _jobStartTime = 0;
+
+function formatBytes(b) { return b >= 1073741824 ? (b/1073741824).toFixed(1)+'GB' : b>=1048576 ? (b/1048576).toFixed(1)+'MB' : b>=1024 ? (b/1024).toFixed(1)+'KB' : b+'B'; }
+function formatETA(sec) { if (sec<=0) return ''; var m=Math.floor(sec/60),s=Math.floor(sec%60); return '预计剩余 '+(m>0?m+'分':'')+s+'秒'; }
 
 function startProgress(title, total) {
   _currentJobId = null;
   if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
-  const panel = document.getElementById('progressPanel');
+  _jobStartTime = Date.now();
+  var panel = document.getElementById('progressPanel');
   document.getElementById('progTitle').textContent = title;
   document.getElementById('progFill').style.width = '0%';
-  document.getElementById('progStats').textContent = '0 / ' + total;
-  document.getElementById('progCurrent').textContent = '启动中...';
+  document.getElementById('progPct').textContent = '0%';
+  document.getElementById('progFile').textContent = '待启动';
   document.getElementById('progSpeed').textContent = '';
+  document.getElementById('progETA').textContent = '';
   panel.classList.add('show');
 }
 
 function updateProgressUI(job) {
-  const pct = job.totalItems > 0 ? Math.round(job.current / job.totalItems * 100) : 0;
+  var pct = job.totalItems > 0 ? Math.round(job.current / job.totalItems * 100) : 0;
   document.getElementById('progFill').style.width = pct + '%';
-  document.getElementById('progStats').textContent = job.completed + ' ✓ / ' + job.totalItems + ' 总';
-  const item = job.currentItem || {};
-  const name = item.name || '';
-  document.getElementById('progCurrent').textContent = (job.current + '/' + job.totalItems) + (name ? ' ' + name : '');
+  document.getElementById('progPct').textContent = pct + '%';
 
-  // 速率：优先显示 MB/s，其次秒/个
-  var speedText = '';
-  if (job.elapsed && job.elapsed > 1000 && job.totalBytes > 0) {
-    const mb = job.totalBytes / 1024 / 1024;
-    const sec = job.elapsed / 1000;
-    speedText = (mb / sec).toFixed(1) + ' MB/s';
-  } else if (job.elapsed && job.totalItems > 0) {
-    const rate = job.current > 0 ? (job.elapsed / job.current / 1000).toFixed(1) : 0;
-    speedText = rate > 0 ? rate + '秒/个' : '';
+  var item = job.currentItem || {};
+  document.getElementById('progFile').textContent = '「' + (item.name || '...') + '」' + (job.current || 0) + '/' + job.totalItems;
+
+  // 速度 + ETA
+  var elapsed = job.elapsed || (Date.now() - _jobStartTime);
+  var speedText = '', etaText = '';
+  if (elapsed > 500 && job.totalBytes > 0) {
+    var mb = job.totalBytes / 1048576, sec = elapsed / 1000;
+    speedText = (mb/sec).toFixed(1) + ' MB/s';
+  }
+  if (job.current > 0 && job.status === 'running') {
+    var avgMs = elapsed / job.current;
+    var remain = avgMs * (job.totalItems - job.current);
+    etaText = formatETA(remain / 1000);
   }
   document.getElementById('progSpeed').textContent = speedText;
+  document.getElementById('progETA').textContent = etaText;
 
-  // 状态文本
+  // 状态栏
+  var stats = job.completed + ' ✓ ';
+  if (job.skipped > 0) stats += '| ' + job.skipped + ' 跳过 ';
+  if (job.failed > 0) stats += '| ' + job.failed + ' ✗ ';
+  document.getElementById('progStats').textContent = stats;
+
   if (job.status === 'done') {
-    document.getElementById('progTitle').textContent = '✅ 完成';
+    document.getElementById('progTitle').textContent = '✅ ' + job.projectName + ' 交付完成';
+    document.getElementById('progETA').textContent = '已用时 ' + formatETA(elapsed/1000);
     document.getElementById('jobIndicator').style.display = 'none';
-    if (job.failed > 0) document.getElementById('progStats').textContent += ' | ' + job.failed + ' ✗';
+    if (job.nasDir) { copyText(job.nasDir); toast('✅ 完成！NAS路径已复制', 'success'); }
+    setTimeout(function() { document.getElementById('progressPanel').classList.remove('show'); }, 4000);
   } else if (job.status === 'cancelled') {
     document.getElementById('progTitle').textContent = '⏸ 已取消';
     document.getElementById('jobIndicator').style.display = 'none';
+    setTimeout(function() { document.getElementById('progressPanel').classList.remove('show'); }, 2000);
+  } else if (job.status === 'error') {
+    document.getElementById('progTitle').textContent = '❌ 出错';
+    document.getElementById('jobIndicator').style.display = 'none';
   } else {
-    document.getElementById('progTitle').textContent = '📁 ' + job.projectName + ' — ' + job.type;
-    var jInd = document.getElementById('jobIndicator');
-    jInd.style.display = 'flex';
-    document.getElementById('jobIndicatorText').textContent = job.current + '/' + job.totalItems;
-    jInd.title = '项目: ' + job.projectName + '\n任务: ' + job.type + '\n点击显示进度面板';
-  }
-  if (job.failed > 0 && job.status === 'running') {
-    document.getElementById('progStats').style.color = '#d97706';
+    document.getElementById('progTitle').textContent = '📁 ' + job.projectName + ' · ' + job.type;
+    document.getElementById('jobIndicator').style.display = 'flex';
+    document.getElementById('jobIndicatorText').textContent = pct + '%';
   }
 }
 
 async function pollJob(jobId) {
   _currentJobId = jobId;
   if (_pollTimer) clearInterval(_pollTimer);
+  _jobStartTime = Date.now();
 
-  return new Promise(function(resolve, reject) {
+  return new Promise(function(resolve) {
     _pollTimer = setInterval(async function() {
       try {
-        const job = await api.get('/api/jobs/' + jobId);
+        var job = await api.get('/api/jobs/' + jobId);
         updateProgressUI(job);
 
-        if (job.status === 'done') {
-          clearInterval(_pollTimer);
-          _pollTimer = null;
-          _currentJobId = null;
+        if (job.status === 'done' || job.status === 'cancelled' || job.status === 'error') {
+          clearInterval(_pollTimer); _pollTimer = null; _currentJobId = null;
           document.getElementById('jobIndicator').style.display = 'none';
-          const skipped = job.skipped || 0;
-          addLog('✅ 完成：' + job.completed + ' 成功' + (skipped > 0 ? ' / ' + skipped + ' 跳过' : '') + ' / ' + job.failed + ' 失败');
-          setStatus('完成：成功 ' + job.completed);
-          updateProgressUI(Object.assign({}, job, { status: 'done' }));
-          // 自动复制 NAS 路径
-          if (job.nasDir) {
-            copyText(job.nasDir);
-            addLog('📋 已自动复制 NAS 路径: ' + job.nasDir);
-            toast('✅ 完成！NAS 路径已复制到剪贴板', 'success');
-          }
-          setTimeout(function() { document.getElementById('progressPanel').classList.remove('show'); }, 3000);
-          resolve(job);
-        } else if (job.status === 'cancelled') {
-          clearInterval(_pollTimer);
-          _pollTimer = null;
-          _currentJobId = null;
-          document.getElementById('jobIndicator').style.display = 'none';
-          addLog('⏸ 任务已取消');
-          setStatus('已取消');
-          updateProgressUI(Object.assign({}, job, { status: 'cancelled' }));
-          setTimeout(function() { document.getElementById('progressPanel').classList.remove('show'); }, 1500);
+          var extra = '';
+          if (job.status === 'done') { extra = '成功' + job.completed + (job.skipped>0?'/跳过'+job.skipped:'') + (job.failed>0?'/失败'+job.failed:''); addLog('✅ 完成：' + extra); }
+          else if (job.status === 'cancelled') { addLog('⏸ 已取消'); }
+          else { addLog('❌ 出错：' + (job.error||'')); }
           resolve(job);
         }
-      } catch (e) { /* 继续轮询 */ }
-    }, 500);
+      } catch (e) { /* 继续 */ }
+    }, 300);
   });
 }
 
@@ -668,18 +691,56 @@ function finishProgress(status, msg) {
 
 function cancelCurrentJob() {
   if (!_currentJobId) return;
-  if (!confirm('确定要取消当前复制任务？\n已完成的部分不会被撤销。')) return;
+  if (!confirm('确定取消？已完成部分保留。')) return;
   api.post('/api/jobs/' + _currentJobId + '/cancel', {});
-  document.getElementById('progCurrent').textContent = '正在取消...';
 }
 
 function hideProgress() {
   document.getElementById('progressPanel').classList.remove('show');
-  if (_currentJobId) {
-    document.getElementById('jobIndicator').style.display = 'flex';
-    toast('任务在后台继续运行，点击标题栏 ⏳ 可查看进度', 'info');
-  }
+  if (_currentJobId) toast('任务在后台继续，点击 ⏳ 查看进度', 'info');
 }
+
+// ==================== 后台任务面板 ====================
+var _dashboardTimer = null;
+
+function showDashboard() {
+  var panel = document.getElementById('dashboardPanel');
+  if (panel.classList.contains('show')) { panel.classList.remove('show'); if (_dashboardTimer) clearInterval(_dashboardTimer); return; }
+  panel.classList.add('show');
+  refreshDashboard();
+  _dashboardTimer = setInterval(refreshDashboard, 1500);
+}
+
+async function refreshDashboard() {
+  try {
+    var jobs = await api.get('/api/jobs');
+    var el = document.getElementById('dashboardBody');
+    if (!el) return;
+    if (!jobs.length) { el.innerHTML = '<div style="color:#94a3b8;font-size:12px;padding:8px">暂无后台任务</div>'; return; }
+    var html = '';
+    for (var j of jobs) {
+      var pct = j.totalItems > 0 ? Math.round(j.current/j.totalItems*100) : 0;
+      var elapsed = j.elapsed ? formatETA(j.elapsed/1000) : '';
+      var bg = j.status==='done'?'#22c55e':j.status==='cancelled'?'#94a3b8':j.status==='error'?'#ef4444':'#3b82f6';
+      html += '<div style="margin-bottom:8px;border-bottom:1px solid #334155;padding-bottom:6px">' +
+        '<div style="display:flex;justify-content:space-between"><strong style="font-size:12px;color:#e2e8f0">' + esc(j.projectName||'') + '</strong><span style="font-size:10px;color:#94a3b8">' + esc(j.type) + '</span></div>' +
+        '<div style="font-size:11px;color:#94a3b8">' + j.current + '/' + j.totalItems + ' · ' + j.completed + '✓ ' + (j.skipped>0?j.skipped+'跳过 ':'') + (j.failed>0?j.failed+'✗ ':'') + '</div>' +
+        '<div style="background:#334155;border-radius:2px;height:3px;margin:3px 0"><div style="background:'+bg+';width:'+pct+'%;height:100%;border-radius:2px"></div></div>' +
+        '<div style="font-size:10px;color:#64748b">' + pct + '% · ' + elapsed + '</div>' +
+        (j.status==='error'?'<div style="font-size:10px;color:#ef4444">' + esc(j.error||'') + '</div>':'') +
+        '</div>';
+    }
+    el.innerHTML = html;
+    var badge = document.getElementById('dashboardBadge');
+    if (badge) { var active = jobs.filter(function(j){return j.status==='running'}).length; badge.textContent = active>0?active:''; badge.style.display = active>0?'inline':'none'; }
+  } catch(e) {}
+}
+
+// 点击标题栏任务指示器打开后台面板
+document.addEventListener('DOMContentLoaded', function() {
+  var ji = document.getElementById('jobIndicator');
+  if (ji) ji.onclick = showDashboard;
+});
 
 // ==================== 刷新/切换警告 ====================
 window.addEventListener('beforeunload', function(e) {

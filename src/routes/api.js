@@ -62,39 +62,28 @@ router.post('/import/backup', (req, res) => {
 router.post('/pick-folder', (req, res) => {
   try {
     const os = require('os');
-    const baseName = 'pam_pf_' + Date.now();
-    const pickerVbs = path.join(os.tmpdir(), baseName + '_picker.vbs');
-    const launcherVbs = path.join(os.tmpdir(), baseName + '_launcher.vbs');
-    const resultFile = path.join(os.tmpdir(), baseName + '_res.txt');
+    const resultFile = path.join(os.tmpdir(), 'pam_pf_' + Date.now() + '.txt');
+    // 用 PowerShell 弹出文件夹选择对话框，比 VBS 稳定
+    const ps = [
+      'Add-Type -AssemblyName System.Windows.Forms',
+      '$fbd = New-Object System.Windows.Forms.FolderBrowserDialog',
+      '$fbd.Description = "选择文件夹"',
+      '$fbd.ShowNewFolderButton = $true',
+      'if ($fbd.ShowDialog() -eq "OK") {',
+      '  [System.IO.File]::WriteAllText("' + resultFile.replace(/\\/g, '\\\\') + '", $fbd.SelectedPath, [System.Text.Encoding]::UTF8)',
+      '}'
+    ].join('\n');
+    const psFile = resultFile.replace('.txt', '.ps1');
+    fs.writeFileSync(psFile, '\uFEFF' + ps, 'utf8'); // UTF-8 BOM
 
-    const picker = [
-      'Set sa  = CreateObject("Shell.Application")',
-      'Set f   = sa.BrowseForFolder(0, "Select Folder", 81, 0)',
-      'If Not f Is Nothing Then',
-      '  Set stm = CreateObject("ADODB.Stream")',
-      '  stm.Type = 2 : stm.Charset = "utf-8" : stm.Open',
-      '  stm.WriteText f.Self.Path, 0',
-      '  stm.SaveToFile "' + resultFile.replace(/\\/g, '\\\\') + '", 2',
-      '  stm.Close',
-      'End If'
-    ].join('\r\n');
-    fs.writeFileSync(pickerVbs, picker, 'utf8');
-
-    const launcher = [
-      'Set ws = CreateObject("WScript.Shell")',
-      'ws.Run "wscript.exe \"' + pickerVbs.replace(/\\/g, '\\\\') + '\"", 1, True'
-    ].join('\r\n');
-    fs.writeFileSync(launcherVbs, launcher, 'utf8');
-
-    execSync('wscript.exe "' + launcherVbs + '"', { timeout: 120000 });
+    execSync('powershell.exe -NoProfile -ExecutionPolicy Bypass -File "' + psFile + '"', { timeout: 120000, windowsHide: true });
 
     let sel = '';
     if (fs.existsSync(resultFile)) {
       sel = fs.readFileSync(resultFile, 'utf8').replace(/^\uFEFF/, '').trim();
       try { fs.unlinkSync(resultFile); } catch(e) {}
     }
-    try { fs.unlinkSync(pickerVbs); } catch(e) {}
-    try { fs.unlinkSync(launcherVbs); } catch(e) {}
+    try { fs.unlinkSync(psFile); } catch(e) {}
     res.json({ success: true, path: sel });
   } catch(e) {
     res.json({ success: false, path: '', error: e.message || '超时或取消' });
@@ -105,7 +94,11 @@ router.post('/pick-folder', (req, res) => {
 router.post('/open-explorer', (req, res) => {
   const { path: p } = req.body;
   if (!p) return res.status(400).json({ error: '路径为空' });
-  execFile('explorer.exe', [p], (err) => { if (err) console.error('explorer 失败:', p, err.message); });
+  if (!fs.existsSync(p)) return res.status(400).json({ error: '路径不存在: ' + p });
+  // 用 cmd /c start 避免包含中文/特殊字符的路径被 explorer 误解
+  execFile('cmd.exe', ['/c', 'start', '', 'explorer.exe', p.replace(/\//g, '\\')], (err) => {
+    if (err) console.error('explorer 失败:', p, err.message);
+  });
   res.json({ success: true });
 });
 

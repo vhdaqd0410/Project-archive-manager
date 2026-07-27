@@ -39,6 +39,19 @@ function getJob(jobId) { return runningJobs[jobId] || null; }
 
 // 挂在 Express router 上
 function mountJobRoutes(router) {
+  // 列出所有任务
+  router.get('/jobs', (req, res) => {
+    const list = Object.values(runningJobs).map(j => ({
+      id: j.id, projectName: j.projectName, type: j.type,
+      totalItems: j.totalItems, current: j.current,
+      completed: j.completed, failed: j.failed, skipped: j.skipped,
+      status: j.status, nasDir: j.nasDir || '',
+      totalBytes: j.totalBytes || 0,
+      elapsed: j.startTime ? ((j.endTime || Date.now()) - j.startTime) : 0
+    }));
+    res.json(list);
+  });
+
   router.get('/jobs/:jobId', (req, res) => {
     const job = runningJobs[req.params.jobId];
     if (!job) return res.status(404).json({ error: '任务不存在或已过期' });

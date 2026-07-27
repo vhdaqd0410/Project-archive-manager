@@ -94,8 +94,56 @@ router.get('/:id/check-nas', (req, res) => {
   res.json(result);
 });
 
+// ==================== 异步复制辅助函数 ====================
+function yieldLoop() { return new Promise(r => setImmediate(r)); }
+
+async function copyFilesAsync(list, localEpDir, nasEpDir, job) {
+  let ok = 0, fail = 0, skip = 0, totalBytes = 0;
+  for (let i = 0; i < list.length; i++) {
+    if (job.cancel) break;
+    // 每10个文件让出事件循环一次（平衡性能与响应）
+    if (i % 10 === 0) await yieldLoop();
+    const f = list[i];
+    const src = path.join(localEpDir, f);
+    const dst = path.join(nasEpDir, f);
+    try {
+      const srcStat = fs.statSync(src);
+      if (fs.existsSync(dst) && fs.statSync(dst).size === srcStat.size) { skip++; updateJobProgress(job, i, f, 'skip'); continue; }
+      // 大于10MB的文件用异步复制
+      if (srcStat.size > 10 * 1024 * 1024) {
+        await fs.promises.copyFile(src, dst);
+        await yieldLoop();
+      } else {
+        fs.copyFileSync(src, dst);
+      }
+      totalBytes += srcStat.size; ok++;
+      updateJobProgress(job, i, f, 'ok');
+    } catch (e) { fail++; updateJobProgress(job, i, f, 'fail'); }
+  }
+  return { ok, fail, skip, totalBytes };
+}
+
+async function copyDirsAsync(batchNames, localBase, nasBase, job) {
+  let ok = 0, fail = 0;
+  const fsPromises = fs.promises;
+  for (let i = 0; i < batchNames.length; i++) {
+    if (job.cancel) break;
+    if (i % 3 === 0) await yieldLoop();
+    const name = batchNames[i];
+    const src = path.join(localBase, name);
+    const dst = path.join(nasBase, name);
+    try {
+      await fsPromises.cp(src, dst, { recursive: true, force: true });
+      await yieldLoop();
+      ok++;
+      updateJobProgress(job, i, name, 'ok');
+    } catch (e) { fail++; updateJobProgress(job, i, name, 'fail'); }
+  }
+  return { ok, fail };
+}
+
 // ==================== 复制 ====================
-router.post('/:id/copy', (req, res) => {
+router.post('/:id/copy', async (req, res) => {
   const r = shared.getProjectById(req.params.id);
   if (!r) return res.status(404).json({ error: '项目不存在' });
   const { fileNames, keyword } = req.body;
@@ -106,27 +154,17 @@ router.post('/:id/copy', (req, res) => {
   if (!fs.existsSync(resolved.nasEpDir)) fs.mkdirSync(resolved.nasEpDir, { recursive: true });
 
   const list = Array.isArray(fileNames) ? fileNames : [];
-  const job = createJob(r.project.id, r.project.name, list.length, '单文件复制');
+  const job = createJob(r.project.id, r.project.name, list.length, '文件复制');
   job.startTime = Date.now();
+  job.status = 'running';
+  job.nasDir = resolved.nasEpDir;
   res.json({ success: true, jobId: job.id, totalItems: list.length });
 
-  job.status = 'running';
-  let ok = 0, fail = 0, skip = 0, totalBytes = 0;
-  for (let i = 0; i < list.length; i++) {
-    if (job.cancel) break;
-    const f = list[i];
-    const src = path.join(resolved.localEpDir, f);
-    const dst = path.join(resolved.nasEpDir, f);
-    try {
-      const srcStat = fs.statSync(src);
-      if (fs.existsSync(dst) && fs.statSync(dst).size === srcStat.size) { skip++; updateJobProgress(job, i, f, 'skip'); continue; }
-      fs.copyFileSync(src, dst);
-      totalBytes += srcStat.size; ok++;
-      updateJobProgress(job, i, f, 'ok');
-    } catch (e) { fail++; updateJobProgress(job, i, f, 'fail'); }
-  }
-  finishJob(job, job.cancel ? 'cancelled' : 'done', { nasDir: resolved.nasEpDir, totalBytes });
-  projectService.addDeliveryLog(r.project.name, r.project.id, '单文件复制', `关键词: ${kw}, 文件数: ${list.length}`, ok, fail);
+  try {
+    const result = await copyFilesAsync(list, resolved.localEpDir, resolved.nasEpDir, job);
+    finishJob(job, job.cancel ? 'cancelled' : 'done', { nasDir: resolved.nasEpDir, totalBytes: result.totalBytes });
+    projectService.addDeliveryLog(r.project.name, r.project.id, '文件复制', `关键词: ${kw}, 文件: ${list.length}`, result.ok, result.fail);
+  } catch (e) { finishJob(job, 'error', { error: e.message }); }
 });
 
 // ==================== 修改 / 000 交付 ====================
@@ -153,7 +191,7 @@ router.get('/:id/modify-batches', (req, res) => {
   res.json({ found: true, keyword, kwRelPath: rel, localKwDir: localKw, nasKwDir: nasKw, batches });
 });
 
-router.post('/:id/modify-copy-batch', (req, res) => {
+router.post('/:id/modify-copy-batch', async (req, res) => {
   const r = shared.getProjectById(req.params.id);
   if (!r) return res.status(404).json({ error: '项目不存在' });
   const { batchNames, keyword } = req.body;
@@ -167,17 +205,15 @@ router.post('/:id/modify-copy-batch', (req, res) => {
 
   const job = createJob(p.id, p.name, batchNames.length, kw + '交付');
   job.startTime = Date.now();
+  job.status = 'running';
+  job.nasDir = nk;
   res.json({ success: true, jobId: job.id, totalItems: batchNames.length });
 
-  job.status = 'running';
-  let ok = 0, fail = 0;
-  for (let i = 0; i < batchNames.length; i++) {
-    if (job.cancel) break;
-    try { fileService.copyDirRecursive(path.join(lk, batchNames[i]), path.join(nk, batchNames[i])); ok++; updateJobProgress(job, i, batchNames[i], 'ok'); }
-    catch (e) { fail++; updateJobProgress(job, i, batchNames[i], 'fail'); }
-  }
-  finishJob(job, job.cancel ? 'cancelled' : 'done', { nasDir: nk });
-  projectService.addDeliveryLog(p.name, p.id, '批次复制', `关键词: ${kw}, 批次: ${batchNames.join(', ')}`, ok, fail);
+  try {
+    const result = await copyDirsAsync(batchNames, lk, nk, job);
+    finishJob(job, job.cancel ? 'cancelled' : 'done', { nasDir: nk });
+    projectService.addDeliveryLog(p.name, p.id, '批次复制', `关键词: ${kw}, 批次: ${batchNames.join(', ')}`, result.ok, result.fail);
+  } catch (e) { finishJob(job, 'error', { error: e.message }); }
 });
 
 // ==================== 集数监控 ====================
@@ -206,12 +242,60 @@ function countVideoFilesRecursive(dir) {
   return count;
 }
 
+// 从文件名中提取所有可能代表集号的数字（优先前几位，去重）
+function extractEpisodeNumbers(dir) {
+  if (!dir || !fs.existsSync(dir)) return [];
+  const nums = [];
+  try {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (!e.isFile() || !VIDEO_EXTS.has(path.extname(e.name).toLowerCase())) continue;
+      const base = path.basename(e.name, path.extname(e.name));
+      // 提取所有数字序列
+      const matches = base.match(/\d+/g);
+      if (!matches) continue;
+      // 优先取第一个 1-4 位数字（集号通常在开头，如 01、第01、EP01）
+      for (const m of matches) {
+        const n = parseInt(m);
+        if (n >= 1 && n <= 9999) { nums.push(n); break; }
+      }
+    }
+  } catch (e) {}
+  return [...new Set(nums)].sort((a, b) => a - b);
+}
+
+// 根据已有集数和目标集数，计算缺失区间
+function findMissingEpisodes(foundNums, target) {
+  if (!target || target <= 0) return [];
+  const foundSet = new Set(foundNums);
+  const missing = [];
+  for (let i = 1; i <= target; i++) {
+    if (!foundSet.has(i)) missing.push(i);
+  }
+  // 压缩为区间表示
+  const ranges = [];
+  if (!missing.length) return [];
+  let start = missing[0], end = missing[0];
+  for (let i = 1; i < missing.length; i++) {
+    if (missing[i] === end + 1) { end = missing[i]; }
+    else {
+      ranges.push(start === end ? String(start) : start + '-' + end);
+      start = missing[i]; end = missing[i];
+    }
+  }
+  ranges.push(start === end ? String(start) : start + '-' + end);
+  return {
+    missingCount: missing.length,
+    ranges,
+    hasMissing: missing.length > 0,
+  };
+}
+
 router.get('/:id/monitor', (req, res) => {
   const r = shared.getProjectById(req.params.id);
   if (!r) return res.status(404).json({ error: '项目不存在' });
   const p = r.project;
   const target = p.episodeTarget || 0;
-  const result = { episodeTarget: target, status: target > 0 ? 'progress' : '无目标' };
+  const result = { episodeTarget: target, status: target > 0 ? '监控中' : '未设置目标集数' };
 
   // 关键词目录（初版交付）
   const kw = shared.settings.keyword || '项目归档资料';
@@ -219,6 +303,12 @@ router.get('/:id/monitor', (req, res) => {
   if (resolved.relPath && resolved.localExists) {
     result.archiveCount = countVideoFiles(resolved.localEpDir);
     result.archivePath = resolved.localEpDir;
+    // 缺失集数分析
+    if (target > 0) {
+      const foundNums = extractEpisodeNumbers(resolved.localEpDir);
+      result.archiveFoundNums = foundNums;
+      result.archiveMissing = findMissingEpisodes(foundNums, target);
+    }
   }
 
   // 上映单集版（修改交付）
@@ -239,7 +329,7 @@ router.get('/:id/monitor', (req, res) => {
   if (target > 0) {
     const kwCount = result.archiveCount || 0;
     result.progress = Math.min(100, Math.round(kwCount / target * 100));
-    if (kwCount >= target) { result.status = 'ready'; result.archiveReady = true; }
+    if (kwCount >= target) { result.status = '可交付'; result.archiveReady = true; }
     result.modifyReady = (result.modifyCount || 0) > 0;
     result.d000Ready = (result.d000Count || 0) > 0;
   }
