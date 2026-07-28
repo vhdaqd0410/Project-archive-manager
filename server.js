@@ -14,7 +14,8 @@ const server = app.listen(PORT, () => {
   const url = `http://localhost:${PORT}`;
   console.log(`\n✅ 项目档案管理器已启动: ${url}`);
   console.log(`📌 PID: ${process.pid}`);
-  console.log(`🛑 Ctrl+C 停止\n`);
+  // Electron 模式下不打印 Ctrl+C 提示
+  if (!process.env.ELECTRON) console.log(`🛑 Ctrl+С 停止\n`);
 });
 
 process.on('SIGINT', () => {

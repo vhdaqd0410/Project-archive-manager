@@ -11,6 +11,8 @@ projects.forEach(p => {
   if (!p.status) p.status = 'editing';
   if (!p.id) p.id = crypto.randomUUID();
   if (!p.memo) p.memo = '';
+  if (!p.episodeTarget) p.episodeTarget = 0;
+  if (!p.episodeAssignments) p.episodeAssignments = [];
 });
 
 function findIndexById(id) {

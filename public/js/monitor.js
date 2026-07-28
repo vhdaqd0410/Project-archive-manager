@@ -93,6 +93,16 @@ async function refreshMonitor(isAuto) {
           tip = ranges.slice(0, 6).join(', ') + ' …等' + ranges.length + '处';
         }
         lines.push('<span style="color:#f97316;font-size:11px">⚠ 缺少 ' + data.archiveMissing.missingCount + ' 集：' + tip + '</span>');
+      // 按人员分组显示缺失
+      if (data.missingByPerson && data.missingByPerson.length > 0) {
+        lines.push('<div style="margin-top:4px;font-size:11px"><span style="color:#e2e8f0">📋 各剪辑人员缺失：</span></div>');
+        for (var pi = 0; pi < data.missingByPerson.length; pi++) {
+          var pinfo = data.missingByPerson[pi];
+          var pbar = '<div style="background:#334155;border-radius:2px;height:3px;margin:2px 0;width:100%"><div style="background:linear-gradient(90deg,#f59e0b,#f97316);width:' + pinfo.progress + '%;height:100%;border-radius:2px"></div></div>';
+          var ptag = pinfo.missingCount <= 0 ? '<span style="color:#22c55e">✓ 齐</span>' : '<span style="color:#f97316">少' + pinfo.missingCount + '集：' + pinfo.ranges.join(',') + '</span>';
+          lines.push('<span style="color:#cbd5e1">  👤 ' + esc(pinfo.name) + '（' + pinfo.start + '-' + pinfo.end + '集）</span> ' + ptag + pbar);
+        }
+      }
       }
     }
     if (data.modifyCount !== undefined) {

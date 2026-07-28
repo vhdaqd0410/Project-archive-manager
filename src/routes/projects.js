@@ -12,7 +12,7 @@ const { createJob, updateJobProgress, finishJob } = require('./jobs');
 router.get('/', (req, res) => res.json(shared.projects));
 
 router.post('/', (req, res) => {
-  const { name, localDir, nasDir, memo, episodeTarget } = req.body;
+  const { name, localDir, nasDir, memo, episodeTarget, episodeAssignments } = req.body;
   if (!name || !name.trim()) return res.status(400).json({ error: '项目名称不能为空' });
   const p = {
     id: crypto.randomUUID(),
@@ -22,7 +22,8 @@ router.post('/', (req, res) => {
     memo: (memo || '').trim(),
     status: 'editing',
     createdAt: new Date().toISOString(),
-    episodeTarget: parseInt(episodeTarget) || 0
+    episodeTarget: parseInt(episodeTarget) || 0,
+    episodeAssignments: Array.isArray(episodeAssignments) ? episodeAssignments : []
   };
   shared.projects.push(p); projectService.saveProjects(shared.projects);
   res.json({ success: true, project: p });
@@ -31,7 +32,7 @@ router.post('/', (req, res) => {
 router.put('/:id', (req, res) => {
   const r = shared.getProjectById(req.params.id);
   if (!r) return res.status(404).json({ error: '项目不存在' });
-  const { name, localDir, nasDir, status, memo, episodeTarget } = req.body;
+  const { name, localDir, nasDir, status, memo, episodeTarget, episodeAssignments } = req.body;
   if (!name || !name.trim()) return res.status(400).json({ error: '名称不能为空' });
   shared.projects[r.index] = {
     ...shared.projects[r.index],
@@ -40,6 +41,7 @@ router.put('/:id', (req, res) => {
     nasDir: (nasDir || '').trim(),
     memo: memo !== undefined ? (memo || '').trim() : (shared.projects[r.index].memo || ''),
     episodeTarget: episodeTarget !== undefined ? (parseInt(episodeTarget) || 0) : (shared.projects[r.index].episodeTarget || 0),
+    episodeAssignments: episodeAssignments !== undefined ? episodeAssignments : (shared.projects[r.index].episodeAssignments || []),
     status: status || shared.projects[r.index].status || 'editing'
   };
   projectService.saveProjects(shared.projects);
@@ -300,15 +302,19 @@ router.get('/:id/monitor', (req, res) => {
   // 关键词目录（初版交付）
   const kw = shared.settings.keyword || '项目归档资料';
   const resolved = fileService.resolveEpisodeDirs(p, kw);
+  let foundNums = [];
   if (resolved.relPath && resolved.localExists) {
     result.archiveCount = countVideoFiles(resolved.localEpDir);
     result.archivePath = resolved.localEpDir;
-    // 缺失集数分析
     if (target > 0) {
-      const foundNums = extractEpisodeNumbers(resolved.localEpDir);
+      foundNums = extractEpisodeNumbers(resolved.localEpDir);
       result.archiveFoundNums = foundNums;
       result.archiveMissing = findMissingEpisodes(foundNums, target);
     }
+  }
+  // 按人员分组缺失（无论目录是否存在都计算）
+  if (target > 0) {
+    result.missingByPerson = getMissingByPerson(foundNums, target, p.episodeAssignments);
   }
 
   // 上映单集版（修改交付）
@@ -336,5 +342,39 @@ router.get('/:id/monitor', (req, res) => {
 
   res.json(result);
 });
+
+// 按剪辑人员分组统计缺失集数
+function getMissingByPerson(foundNums, target, assignments) {
+  if (!assignments || !assignments.length || !target) return [];
+  const foundSet = new Set(foundNums);
+  const result = [];
+  for (const asgn of assignments) {
+    if (!asgn.name || !asgn.name.trim()) continue;
+    const missing = [];
+    for (let ep = asgn.start; ep <= asgn.end; ep++) {
+      if (ep < 1 || ep > target) continue;
+      if (!foundSet.has(ep)) missing.push(ep);
+    }
+    if (missing.length > 0) {
+      // 压缩区间
+      const ranges = [];
+      let s = missing[0], e2 = missing[0];
+      for (let i = 1; i < missing.length; i++) {
+        if (missing[i] === e2 + 1) { e2 = missing[i]; }
+        else { ranges.push(s === e2 ? String(s) : s + '-' + e2); s = missing[i]; e2 = missing[i]; }
+      }
+      ranges.push(s === e2 ? String(s) : s + '-' + e2);
+      result.push({
+        name: asgn.name.trim(),
+        start: asgn.start, end: asgn.end,
+        missingCount: missing.length,
+        ranges,
+        progress: Math.round((asgn.end - asgn.start + 1 - missing.length) / (asgn.end - asgn.start + 1) * 100)
+      });
+    }
+  }
+  result.sort((a, b) => b.missingCount - a.missingCount);
+  return result;
+}
 
 module.exports = router;

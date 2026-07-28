@@ -1,12 +1,63 @@
 {
   "name": "project-archive-manager",
-  "version": "2.0.0",
-  "description": "项目档案管理器",
-  "main": "server.js",
+  "version": "2.5.0",
+  "description": "项目档案管理器 — 桌面应用",
+  "main": "electron/main.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "electron": "electron .",
+    "build": "electron-builder --win portable",
+    "build:installer": "electron-builder --win nsis"
+  },
+  "build": {
+    "appId": "com.pam.project-archive-manager",
+    "productName": "项目档案管理器",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "electron/**/*",
+      "server.js",
+      "src/**/*",
+      "public/**/*",
+      "data/**/*",
+      "node_modules/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "data",
+        "to": "data"
+      }
+    ],
+    "win": {
+      "target": [
+        "portable",
+        "nsis"
+      ],
+      "icon": "public/favicon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "项目档案管理器"
+    },
+    "portable": {
+      "artifactName": "项目档案管理器_v${version}.exe"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "vhdaqd0410",
+      "repo": "Project-archive-manager"
+    }
   },
   "dependencies": {
     "express": "^4.21.0"
+  },
+  "devDependencies": {
+    "electron": "^35.7.5",
+    "electron-builder": "^25.0.0",
+    "electron-updater": "^6.8.9"
   }
 }

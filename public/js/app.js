@@ -142,8 +142,8 @@ function showContextMenu(e, idx) {
     { label: '✏️ 编辑项目', action: function() { showProjectDlg(idx); } },
     { label: '🎯 设置目标集数', action: function() { setEpisodeTarget(idx); } },
     { label: '🗑 删除项目', action: function() { delProject(); } },
-    { label: '📂 打开本地目录', action: function() { api.post('/api/open-explorer', { path: p.localDir }); } },
-    { label: '📂 打开NAS目录', action: function() { api.post('/api/open-explorer', { path: p.nasDir }); } },
+    { label: '📂 打开本地目录', action: function() { openFolder(p.localDir); } },
+    { label: '📂 打开NAS目录', action: function() { openFolder(p.nasDir); } },
     { label: '📋 复制NAS路径', action: function() { copyText(p.nasDir); } },
     { label: '📋 复制交付信息', action: function() { selectProject(idx); setTimeout(copyDeliveryMsg, 100); } }
   ];
@@ -287,11 +287,16 @@ function selectProject(idx) {
   refresh000();
   refreshHistory();
   startAutoMonitor();
+  // Electron: 自动开启目录监听
+  if (window.electronAPI && window.electronAPI.isElectron && p.localDir) {
+    window.electronAPI.sendMessage("stop-all-watch");
+    window.electronAPI.sendMessage("start-watch", p.localDir, p.id);
+  }
 }
 
 function bindEvents() {
-  let b = $('btnOpenLocal'); if (b) b.onclick = () => { const p = (resolved && resolved.localEpDir) || (projects[sel] || {}).localDir; if (p) api.post('/api/open-explorer', { path: p }); };
-  b = $('btnOpenNas'); if (b) b.onclick = () => { const p = (resolved && resolved.nasEpDir) || (projects[sel] || {}).nasDir; if (p) api.post('/api/open-explorer', { path: p }); };
+  let b = $('btnOpenLocal'); if (b) b.onclick = () => { const p = (resolved && resolved.localEpDir) || (projects[sel] || {}).localDir; if (p) openFolder(p); };
+  b = $('btnOpenNas'); if (b) b.onclick = () => { const p = (resolved && resolved.nasEpDir) || (projects[sel] || {}).nasDir; if (p) openFolder(p); };
   b = $('btnCopyPath'); if (b) b.onclick = () => copyText((resolved && resolved.nasEpDir) || projects[sel].nasDir);
   b = $('btnCopyMsg'); if (b) b.onclick = copyDeliveryMsg;
   b = $('btnRefresh'); if (b) b.onclick = refreshPending;
@@ -310,8 +315,8 @@ function bindEvents() {
   b = $('btn000UncheckAll'); if (b) b.onclick = () => checkAll('list000', false);
   b = $('btn000Copy'); if (b) b.onclick = copy000Delivery;
   b = $('btn000CopyPath'); if (b) b.onclick = () => copyText(nasDir000);
-  b = $('btn000OpenLocal'); if (b) b.onclick = () => api.post('/api/open-explorer', { path: localDir000 });
-  b = $('btn000OpenNas'); if (b) b.onclick = () => api.post('/api/open-explorer', { path: nasDir000 });
+  b = $('btn000OpenLocal'); if (b) b.onclick = () => openFolder(localDir000);
+  b = $('btn000OpenNas'); if (b) b.onclick = () => openFolder(nasDir000);
 }
 
 // ==================== 检测 ====================
@@ -431,6 +436,7 @@ function showProjectDlg(editIdx) {
   h += '<div class="fg"><label>NAS根目录</label><div class="ir"><input id="dlgNas" value="' + escAttr(p.nasDir) + '"><button class="btn btn-sm btn-outline" onclick="pickFolder(\'dlgNas\')">浏览</button></div></div>';
   h += '<div class="fg"><label>备注</label><textarea id="dlgMemo" style="width:100%;height:60px;border:1px solid #e2e8f0;border-radius:7px;padding:8px 12px;font-size:13px;outline:none;resize:vertical" placeholder="添加备注信息...">' + esc(p.memo || '') + '</textarea></div>';
   h += '<div class="fg"><label>目标集数（0=不监控）</label><input id="dlgEpisodeTarget" value="' + (p.episodeTarget || '') + '" type="number" min="0" placeholder="设定总集数"></div>';
+  h += '<div class="fg"><label>集数分配 <span style="font-size:10px;color:#94a3b8">（人员 + 负责集数区间）</span></label><div id="dlgAssignList"></div><div style="display:flex;gap:4px;margin-top:4px"><button class="btn btn-sm btn-outline" onclick="addEpisodeAssign()">+ 添加人员</button></div><textarea id="dlgAssignPaste" placeholder="或直接粘贴格式：&#10;杨永芳：1-2，69-70&#10;程梦：3-4, 67-68&#10;张靖杰：5-6,65-66" style="width:100%;height:80px;margin-top:6px;padding:8px 10px;border:1px solid #475569;border-radius:7px;background:#1e293b;color:#e2e8f0;font-size:12px;resize:vertical;outline:none;font-family:Microsoft YaHei,sans-serif"></textarea><button class="btn btn-sm btn-accent" onclick="parseAssignPaste()" style="margin-top:4px">📋 解析粘贴内容</button></div>';
   h += '<div class="fg"><label>状态</label><select id="dlgStatus"><option value="editing"' + (s === 'editing' ? ' selected' : '') + '>🔵 剪辑中</option><option value="modifying"' + (s === 'modifying' ? ' selected' : '') + '>🟠 修改中</option><option value="done"' + (s === 'done' ? ' selected' : '') + '>✅ 已完成</option></select></div>';
   h += '<div class="modal-btns"><button class="btn btn-primary" onclick="saveProject(' + editIdx + ')">保存</button><button class="btn btn-outline" onclick="closeModal()">取消</button></div>';
   $('modalTitle').textContent = editIdx >= 0 ? '编辑项目' : '新建项目';
@@ -439,6 +445,11 @@ function showProjectDlg(editIdx) {
   // 注入文件夹历史下拉
   ensureFolderDatalist('dlgLocal'); refreshFolderDatalist('dlgLocal');
   ensureFolderDatalist('dlgNas'); refreshFolderDatalist('dlgNas');
+  // 初始化已有集数分配
+  var assigns = p.episodeAssignments || [];
+  for (var ai = 0; ai < assigns.length; ai++) {
+    addEpisodeAssign(assigns[ai].name, assigns[ai].start, assigns[ai].end);
+  }
 }
 
 async function saveProject(editIdx) {
@@ -448,6 +459,7 @@ async function saveProject(editIdx) {
     nasDir: $('dlgNas').value.trim(),
     memo: $('dlgMemo') ? $('dlgMemo').value.trim() : '',
     episodeTarget: parseInt($('dlgEpisodeTarget').value) || 0,
+    episodeAssignments: collectEpisodeAssignments(),
     status: $('dlgStatus').value
   };
   if (!data.name) { alert('请输入名称'); return; }
@@ -455,6 +467,105 @@ async function saveProject(editIdx) {
   else await api.post('/api/projects', data);
   closeModal(); projects = await api.get('/api/projects');
   renderProjectList(); selectProject(editIdx >= 0 ? editIdx : projects.length - 1);
+}
+
+
+
+
+function collectEpisodeAssignments() {
+  var rows = document.querySelectorAll('#dlgAssignList .assign-row');
+  var list = [];
+  rows.forEach(function(r) {
+    var name = (r.querySelector('.assign-name') || {}).value || '';
+    var start = parseInt((r.querySelector('.assign-start') || {}).value) || 0;
+    var end = parseInt((r.querySelector('.assign-end') || {}).value) || 0;
+    if (name && start > 0 && end >= start) list.push({ name: name, start: start, end: end });
+  });
+  return list;
+}
+
+function addEpisodeAssign(name, start, end) {
+  var list = document.getElementById('dlgAssignList'); if (!list) return;
+  var div = document.createElement('div');
+  div.className = 'assign-row';
+  div.style.cssText = 'display:flex;gap:4px;align-items:center;margin-bottom:4px';
+  div.innerHTML = '<input class="assign-name" placeholder="剪辑人员" value="' + escAttr(name||'') + '" style="flex:2;border:1px solid #475569;border-radius:5px;background:#1e293b;color:#e2e8f0;padding:4px 8px;font-size:12px;outline:none">' +
+    '<span style="font-size:11px;color:#94a3b8">第</span><input class="assign-start" type="number" min="1" placeholder="1" value="' + (start||'') + '" style="width:55px;border:1px solid #475569;border-radius:5px;background:#1e293b;color:#e2e8f0;padding:4px 6px;font-size:12px;outline:none">' +
+    '<span style="font-size:11px;color:#94a3b8">~</span><input class="assign-end" type="number" min="1" placeholder="70" value="' + (end||'') + '" style="width:55px;border:1px solid #475569;border-radius:5px;background:#1e293b;color:#e2e8f0;padding:4px 6px;font-size:12px;outline:none" oninput="syncEpisodeTargetFromAssignments()">' +
+    '<span style="font-size:11px;color:#94a3b8">集</span>' +
+    '<button onclick="this.parentElement.remove()" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:14px;line-height:1">&times;</button>';
+  list.appendChild(div);
+  // 每次添加（含初始化）后自动更新目标集数
+  syncEpisodeTargetFromAssignments();
+}
+
+// 从分配信息中提取最大集数，自动填入目标集数
+function syncEpisodeTargetFromAssignments() {
+  var rows = document.querySelectorAll('#dlgAssignList .assign-row');
+  var maxEp = 0;
+  rows.forEach(function(r) {
+    var e = parseInt((r.querySelector('.assign-end') || {}).value) || 0;
+    if (e > maxEp) maxEp = e;
+  });
+  if (maxEp > 0) {
+    var targetEl = document.getElementById('dlgEpisodeTarget');
+    if (targetEl && (!targetEl.value || parseInt(targetEl.value) < maxEp)) {
+      targetEl.value = maxEp;
+      targetEl.style.borderColor = '#22c55e';
+      setTimeout(function() { targetEl.style.borderColor = ''; }, 1500);
+    }
+  }
+}
+
+// 解析粘贴的集数分配文本
+// 格式："杨永芳：1-2，69-70\n程梦：3-4, 67-68"
+function parseAssignPaste() {
+  var el = document.getElementById('dlgAssignPaste'); if (!el) return;
+  var raw = el.value.trim(); if (!raw) { toast('请先粘贴内容', 'warn'); return; }
+  // 清空已有
+  var list = document.getElementById('dlgAssignList');
+  list.innerHTML = '';
+  // 按行分割
+  var lines = raw.split(/[\n\r]+/).filter(function(l) { return l.trim(); });
+  var count = 0;
+  for (var li = 0; li < lines.length; li++) {
+    var line = lines[li].trim();
+    // 分割 人名：后面的部分
+    var colonIdx = line.indexOf('：');
+    if (colonIdx < 0) colonIdx = line.indexOf(':');
+    if (colonIdx < 0) continue;
+    var name = line.substring(0, colonIdx).trim();
+    var rest = line.substring(colonIdx + 1).trim();
+    if (!name || !rest) continue;
+    // 解析集数区间：1-2，69-70 或 5-6,65-66
+    var segs = rest.split(/[,，、]/);
+    for (var si = 0; si < segs.length; si++) {
+      var seg = segs[si].trim().replace(/[（(第]\s*第?/g, '').replace(/[\s集）/]/g, '');
+      var dash = seg.indexOf('-');
+      if (dash < 0) { dash = seg.indexOf('—'); }
+      if (dash < 0) { dash = seg.indexOf('~'); }
+      if (dash < 0) { dash = seg.indexOf('到'); }
+      if (dash < 0) {
+        // 单集：纯数字
+        var n = parseInt(seg);
+        if (!isNaN(n)) { addEpisodeAssign(name, n, n); count++; }
+        continue;
+      }
+      var s = parseInt(seg.substring(0, dash));
+      var e = parseInt(seg.substring(dash + 1));
+      if (!isNaN(s) && !isNaN(e)) {
+        addEpisodeAssign(name, Math.min(s, e), Math.max(s, e));
+        count++;
+      }
+    }
+  }
+  if (count > 0) {
+    toast('已识别 ' + lines.length + ' 人，' + count + ' 个区间', 'success');
+    el.value = '';
+    syncEpisodeTargetFromAssignments();
+  } else {
+    toast('未识别到有效格式', 'error');
+  }
 }
 
 async function delProject() {
@@ -816,17 +927,33 @@ function refreshFolderDatalist(inputId) {
 
 async function pickFolder(inputId) {
   try {
-    const r = await api.post('/api/pick-folder', {});
+    var r;
+    // Electron 环境：用原生对话框（稳定、不依赖 VBS）
+    if (window.electronAPI && window.electronAPI.isElectron) {
+      r = await window.electronAPI.pickFolder();
+    } else {
+      r = await api.post('/api/pick-folder', {});
+    }
     if (r.success && r.path) {
-      const el = document.getElementById(inputId);
+      var el = document.getElementById(inputId);
       if (el) el.value = r.path;
       saveFolderHistory(r.path);
       refreshFolderDatalist(inputId);
     } else if (r.error) {
       toast('选择失败: ' + r.error, 'error');
     }
-  } catch (e) {
-    toast('选择失败: ' + e.message, 'error');
+  } catch (er) {
+    toast('选择失败: ' + (er.message || '未知错误'), 'error');
+  }
+}
+
+// Electron 原生打开文件夹（稳定，不依赖 explorer.exe 命令行解析）
+async function openFolder(dirPath) {
+  if (!dirPath) return;
+  if (window.electronAPI && window.electronAPI.isElectron) {
+    await window.electronAPI.openExplorer(dirPath);
+  } else {
+    await api.post('/api/open-explorer', { path: dirPath });
   }
 }
 
@@ -847,7 +974,7 @@ function openCheckedDir(listId, baseDir) {
     return; // 无可用路径
   }
   for (const d of dirs) {
-    if (d) api.post('/api/open-explorer', { path: d });
+    if (d) openFolder(d);
   }
 }
 
@@ -1045,3 +1172,43 @@ window.addEventListener('unhandledrejection', function(e) {
   console.error('未处理Promise错误:', e.reason);
   toast('操作失败: ' + (e.reason && e.reason.message || '未知错误'), 'error');
 });
+
+// ==================== Electron 桌面功能 ====================
+
+// 拖放文件夹导入
+async function handleDropImport(dirPath) {
+  try {
+    var r = await window.electronAPI.dropImport(dirPath);
+    if (!r.success) { toast(r.error || "导入失败", "error"); return; }
+    var existing = projects.find(function(p) { return p.localDir === r.path; });
+    if (existing) { toast("项目已存在: " + existing.name, "warn"); return; }
+    showProjectDlg(-1);
+    setTimeout(function() {
+      var nm = document.getElementById("dlgName"); if (nm) nm.value = r.name;
+      var ld = document.getElementById("dlgLocal"); if (ld) ld.value = r.path;
+      saveFolderHistory(r.path);
+      toast("已识别项目: " + r.name, "success");
+    }, 300);
+  } catch (er) { toast("拖放导入失败: " + er.message, "error"); }
+}
+
+// 菜单触发文件夹选择导入
+async function triggerFileDialog() {
+  if (!window.electronAPI || !window.electronAPI.isElectron) { toast("请在桌面版使用", "warn"); return; }
+  var r = await window.electronAPI.pickFolder();
+  if (r.success && r.path) handleDropImport(r.path);
+}
+
+// 目录监听回调
+var _fsChangedTimer = null;
+function onFsChanged(projectId) {
+  if (_fsChangedTimer) clearTimeout(_fsChangedTimer);
+  _fsChangedTimer = setTimeout(function() {
+    if (sel >= 0 && projects[sel] && projects[sel].id === projectId) {
+      refreshDetail();
+      refreshMonitor(false);
+      addLog("文件变化已自动刷新");
+    }
+    _fsChangedTimer = null;
+  }, 1500);
+}
