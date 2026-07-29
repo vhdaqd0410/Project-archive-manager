@@ -1,6 +1,24 @@
 // Electron preload：暴露安全的 IPC 桥接到渲染进程
 const { contextBridge, ipcRenderer } = require('electron');
 
+// 所有允许的安全 IPC 通道白名单
+const ALLOWED_RECEIVE_CHANNELS = [
+  'menu:new-project',
+  'menu:import-folder',
+  'menu:export-backup',
+  'menu:import-backup',
+  'drop:import-folder',
+  'fs:changed',
+];
+
+const ALLOWED_SEND_CHANNELS = [
+  'start-watch',
+  'stop-watch',
+  'stop-all-watch',
+  'global-show-window',
+  'register-global-shortcut',
+];
+
 contextBridge.exposeInMainWorld('electronAPI', {
   // 文件夹选择（原生对话框）
   pickFolder: () => ipcRenderer.invoke('pick-folder'),
@@ -12,8 +30,30 @@ contextBridge.exposeInMainWorld('electronAPI', {
   isElectron: true,
   // 平台
   platform: process.platform,
-  // 监听主进程消息
-  onMessage: (channel, callback) => ipcRenderer.on(channel, (_e, ...args) => callback(...args)),
-  // 发送消息
-  sendMessage: (channel, data) => ipcRenderer.send(channel, data)
+  // 监听主进程消息（仅允许白名单通道）
+  onMessage: (channel, callback) => {
+    if (ALLOWED_RECEIVE_CHANNELS.includes(channel)) {
+      const subscription = (_event, ...args) => callback(...args);
+      ipcRenderer.on(channel, subscription);
+      return () => ipcRenderer.removeListener(channel, subscription);
+    }
+    return () => {};
+  },
+  // 发送消息给主进程
+  sendMessage: (channel, data) => {
+    if (ALLOWED_SEND_CHANNELS.includes(channel)) {
+      ipcRenderer.send(channel, data);
+    }
+  },
+  // ── 新增：原生桌面通知 ──
+  showNotification: (title, body) => ipcRenderer.invoke('show-notification', { title, body }),
+  // ── 新增：应用设置 ──
+  getAppSettings: () => ipcRenderer.invoke('get-settings'),
+  setAutoStart: (enabled) => ipcRenderer.invoke('set-auto-start', enabled),
+  // ── 新增：全局快捷键 ──
+  setGlobalHotkey: (accelerator) => {
+    if (ALLOWED_SEND_CHANNELS.includes('register-global-shortcut')) {
+      ipcRenderer.send('register-global-shortcut', accelerator);
+    }
+  },
 });

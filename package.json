@@ -1,6 +1,6 @@
 {
   "name": "project-archive-manager",
-  "version": "2.5.0",
+  "version": "2.6.0",
   "description": "项目档案管理器 — 桌面应用",
   "main": "electron/main.js",
   "scripts": {

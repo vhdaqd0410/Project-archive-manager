@@ -18,8 +18,7 @@ npm install
 ### 桌面版（推荐，更稳定）
 ```bash
 npm install
-双击 启动桌面版.bat
-# 或：右键运行 创建桌面快捷方式.ps1，之后从桌面图标启动
+双击 启动桌面版.vbs
 ```
 
 浏览器自动打开 `http://localhost:37890`（桌面版自带窗口，无需浏览器）。
@@ -83,27 +82,47 @@ npm install
 ## 项目结构
 
 ```
-├── server.js                 # Express 服务（端口 37890）
-├── launch.vbs                # 静默启动 Node（无控制台窗口）
+├── server.js                 # Express 服务（端口 37890，配置抽离至 src/config.js）
 ├── 启动.bat                  # 双击启动
-├── package.json              # 依赖（仅 express）
+├── 启动桌面版.vbs             # 桌面版启动（无控制台）
+├── package.json              # 依赖（express + electron）
 ├── public/
 │   ├── index.html            # 前端 SPA（暗色主题、进度面板）
-│   ├── css/style.css
-│   └── js/app.js             # 前端核心（进度、批量、快捷键、Toast）
+│   ├── css/style.css         # 独立样式表（v2.6.0 从 HTML 抽离）
+│   └── js/
+│       ├── app.js            # 前端核心（进度、批量、快捷键、Toast）
+│       └── monitor.js        # 集数监控（自动轮询、达标通知）
 ├── src/
-│   ├── routes/api.js         # 全部 REST API（含进度 Job 系统）
-│   └── services/             # 数据读写 / 文件操作 / 导入服务
+│   ├── config.js             # 统一配置中心（v2.6.0 新增）
+│   ├── middleware/
+│   │   └── validate.js       # 输入验证中间件（v2.6.0 新增）
+│   ├── routes/
+│   │   ├── api.js            # REST API（含文件浏览、导入导出）
+│   │   ├── projects.js       # 项目管理 API
+│   │   ├── jobs.js           # 后台任务管理
+│   │   ├── import-export.js  # 数据导入导出
+│   │   └── shared.js         # 共享状态层
+│   └── services/
+│       ├── projectService.js # 项目数据读写
+│       ├── fileService.js    # 文件操作（异步复制、目录扫描）
+│       ├── importService.js  # 导入服务
+│       └── logger.js         # 日志服务（v2.6.0 新增）
+├── electron/                 # Electron 桌面版
+│   ├── main.js               # 主进程（托盘、菜单、快捷键、自动更新）
+│   └── preload.js            # 预加载脚本
 ├── data/                     # 自动创建
 │   ├── projects.json         # 项目列表
 │   ├── settings.json         # 关键词、部门模板
 │   └── delivery-log.json     # 交付历史
-└── winforms-app/             # C# WinForms 遗留版
+├── scripts/
+│   └── generate-icon.js      # 图标生成脚本
+└── tools/
+    └── winforms-app/         # C# WinForms 遗留版
 ```
 
 ## 常见问题
 
-**Q: 端口被占用？** 修改 `server.js` 中 `const PORT = 37890`。
+**Q: 端口被占用？** 修改 `src/config.js` 中的 `server.port` 或设置环境变量 `PORT=新端口`。
 
 **Q: 数据在哪？** `data/` 目录下 JSON 文件。侧边栏「导出备份」一键打包全部数据。
 
@@ -115,4 +134,4 @@ npm install
 
 ## 版本
 
-**v2.1.4** — 功能完整、稳定可靠。
+**v2.6.0** — 架构优化：统一配置中心、输入验证中间件、日志服务、代码质量提升（var→let、异步 fs）、安全增强（PowerShell Base64 防注入）。

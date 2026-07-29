@@ -60,32 +60,37 @@ router.post('/import/backup', (req, res) => {
 
 // ── 文件夹浏览 ──
 router.post('/pick-folder', (req, res) => {
-  try {
-    const os = require('os');
-    const resultFile = path.join(os.tmpdir(), 'pam_pf_' + Date.now() + '.txt');
-    // 用 PowerShell 弹出文件夹选择对话框，比 VBS 稳定
-    const ps = [
-      'Add-Type -AssemblyName System.Windows.Forms',
-      '$fbd = New-Object System.Windows.Forms.FolderBrowserDialog',
-      '$fbd.Description = "选择文件夹"',
-      '$fbd.ShowNewFolderButton = $true',
-      'if ($fbd.ShowDialog() -eq "OK") {',
-      '  [System.IO.File]::WriteAllText("' + resultFile.replace(/\\/g, '\\\\') + '", $fbd.SelectedPath, [System.Text.Encoding]::UTF8)',
-      '}'
-    ].join('\n');
-    const psFile = resultFile.replace('.txt', '.ps1');
-    fs.writeFileSync(psFile, '\uFEFF' + ps, 'utf8'); // UTF-8 BOM
+  // 安全模式：用环境变量传递结果路径，避免脚本注入
+  const os = require('os');
+  const resultFile = path.join(os.tmpdir(), 'pam_pf_' + Date.now() + '.txt');
 
-    execSync('powershell.exe -NoProfile -ExecutionPolicy Bypass -File "' + psFile + '"', { timeout: 120000, windowsHide: true });
+  // 将 PS 脚本 Base64 编码，避免路径中包含特殊字符导致注入
+  const psScript = [
+    'Add-Type -AssemblyName System.Windows.Forms',
+    '$fbd = New-Object System.Windows.Forms.FolderBrowserDialog',
+    '$fbd.Description = "选择文件夹"',
+    '$fbd.ShowNewFolderButton = $true',
+    'if ($fbd.ShowDialog() -eq "OK") {',
+    '  [System.IO.File]::WriteAllText($env:PAM_RESULT_FILE, $fbd.SelectedPath, [System.Text.Encoding]::UTF8)',
+    '}'
+  ].join('\n');
+  const psB64 = Buffer.from('\uFEFF' + psScript, 'utf16le').toString('base64');
+
+  try {
+    execSync(
+      `powershell.exe -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${psB64}`,
+      { timeout: 120000, windowsHide: true, env: { ...process.env, PAM_RESULT_FILE: resultFile } }
+    );
 
     let sel = '';
     if (fs.existsSync(resultFile)) {
       sel = fs.readFileSync(resultFile, 'utf8').replace(/^\uFEFF/, '').trim();
-      try { fs.unlinkSync(resultFile); } catch(e) {}
+      try { fs.unlinkSync(resultFile); } catch (e) { /* 清理失败忽略 */ }
     }
-    try { fs.unlinkSync(psFile); } catch(e) {}
     res.json({ success: true, path: sel });
-  } catch(e) {
+  } catch (e) {
+    // 清理残留文件
+    try { if (fs.existsSync(resultFile)) fs.unlinkSync(resultFile); } catch (_) {}
     res.json({ success: false, path: '', error: e.message || '超时或取消' });
   }
 });

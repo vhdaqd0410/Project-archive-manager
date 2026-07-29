@@ -7,13 +7,14 @@ const projectService = require('../services/projectService');
 const fileService = require('../services/fileService');
 const shared = require('./shared');
 const { createJob, updateJobProgress, finishJob } = require('./jobs');
+const config = require('../config');
+const { validate, presets } = require('../middleware/validate');
 
 // ==================== CRUD ====================
 router.get('/', (req, res) => res.json(shared.projects));
 
-router.post('/', (req, res) => {
+router.post('/', validate({ name: presets.projectName }), (req, res) => {
   const { name, localDir, nasDir, memo, episodeTarget, episodeAssignments } = req.body;
-  if (!name || !name.trim()) return res.status(400).json({ error: '项目名称不能为空' });
   const p = {
     id: crypto.randomUUID(),
     name: name.trim(),
@@ -29,11 +30,10 @@ router.post('/', (req, res) => {
   res.json({ success: true, project: p });
 });
 
-router.put('/:id', (req, res) => {
+router.put('/:id', validate({ name: presets.projectName }), (req, res) => {
   const r = shared.getProjectById(req.params.id);
   if (!r) return res.status(404).json({ error: '项目不存在' });
   const { name, localDir, nasDir, status, memo, episodeTarget, episodeAssignments } = req.body;
-  if (!name || !name.trim()) return res.status(400).json({ error: '名称不能为空' });
   shared.projects[r.index] = {
     ...shared.projects[r.index],
     name: name.trim(),
@@ -48,11 +48,10 @@ router.put('/:id', (req, res) => {
   res.json({ success: true, project: shared.projects[r.index] });
 });
 
-router.put('/:id/status', (req, res) => {
+router.put('/:id/status', validate({ status: presets.projectStatus }), (req, res) => {
   const r = shared.getProjectById(req.params.id);
   if (!r) return res.status(404).json({ error: '项目不存在' });
   const { status } = req.body;
-  if (!['editing', 'modifying', 'done'].includes(status)) return res.status(400).json({ error: '无效状态' });
   shared.projects[r.index].status = status;
   projectService.saveProjects(shared.projects);
   res.json({ success: true });
@@ -101,22 +100,28 @@ function yieldLoop() { return new Promise(r => setImmediate(r)); }
 
 async function copyFilesAsync(list, localEpDir, nasEpDir, job) {
   let ok = 0, fail = 0, skip = 0, totalBytes = 0;
+  const { yieldEveryN, largeFileThresholdBytes } = config.fileOps;
   for (let i = 0; i < list.length; i++) {
     if (job.cancel) break;
-    // 每10个文件让出事件循环一次（平衡性能与响应）
-    if (i % 10 === 0) await yieldLoop();
+    if (i % yieldEveryN === 0) await yieldLoop();
     const f = list[i];
     const src = path.join(localEpDir, f);
     const dst = path.join(nasEpDir, f);
     try {
-      const srcStat = fs.statSync(src);
-      if (fs.existsSync(dst) && fs.statSync(dst).size === srcStat.size) { skip++; updateJobProgress(job, i, f, 'skip'); continue; }
-      // 大于10MB的文件用异步复制
-      if (srcStat.size > 10 * 1024 * 1024) {
+      const srcStat = await fs.promises.stat(src);
+      // 检查目标文件是否已经存在且大小一致
+      let dstExists = false;
+      try {
+        const dstStat = await fs.promises.stat(dst);
+        dstExists = dstStat.size === srcStat.size;
+      } catch (_) { /* 目标不存在，需要复制 */ }
+      if (dstExists) { skip++; updateJobProgress(job, i, f, 'skip'); continue; }
+      // 大文件用异步复制，小文件可继续同步（经测试同步复制对小文件更快）
+      if (srcStat.size > largeFileThresholdBytes) {
         await fs.promises.copyFile(src, dst);
         await yieldLoop();
       } else {
-        fs.copyFileSync(src, dst);
+        await fs.promises.copyFile(src, dst);
       }
       totalBytes += srcStat.size; ok++;
       updateJobProgress(job, i, f, 'ok');
@@ -128,9 +133,10 @@ async function copyFilesAsync(list, localEpDir, nasEpDir, job) {
 async function copyDirsAsync(batchNames, localBase, nasBase, job) {
   let ok = 0, fail = 0;
   const fsPromises = fs.promises;
+  const { dirYieldEveryN } = config.fileOps;
   for (let i = 0; i < batchNames.length; i++) {
     if (job.cancel) break;
-    if (i % 3 === 0) await yieldLoop();
+    if (i % dirYieldEveryN === 0) await yieldLoop();
     const name = batchNames[i];
     const src = path.join(localBase, name);
     const dst = path.join(nasBase, name);
@@ -149,7 +155,7 @@ router.post('/:id/copy', async (req, res) => {
   const r = shared.getProjectById(req.params.id);
   if (!r) return res.status(404).json({ error: '项目不存在' });
   const { fileNames, keyword } = req.body;
-  const kw = keyword || shared.settings.keyword || '项目归档资料';
+  const kw = keyword || shared.settings.keyword || config.defaults.keyword;
   const resolved = fileService.resolveEpisodeDirs(r.project, kw);
   if (!resolved.relPath) return res.status(400).json({ error: '未检测到关键词目录' });
   if (!resolved.localExists) return res.status(400).json({ error: '本地不存在' });
@@ -173,7 +179,7 @@ router.post('/:id/copy', async (req, res) => {
 router.get('/:id/modify-batches', (req, res) => {
   const r = shared.getProjectById(req.params.id);
   if (!r) return res.status(404).json({ error: '项目不存在' });
-  const keyword = req.query.keyword || '上映单集版';
+  const keyword = req.query.keyword || config.deliveryKeywords.modify;
   const p = r.project;
   const rel = fileService.findKeywordDir(p.localDir, keyword) || fileService.findKeywordDir(p.nasDir, keyword);
   if (!rel) return res.json({ found: false, keyword, batches: [] });
@@ -198,7 +204,7 @@ router.post('/:id/modify-copy-batch', async (req, res) => {
   if (!r) return res.status(404).json({ error: '项目不存在' });
   const { batchNames, keyword } = req.body;
   if (!Array.isArray(batchNames) || !batchNames.length) return res.status(400).json({ error: '请指定批次' });
-  const kw = keyword || '上映单集版';
+  const kw = keyword || config.deliveryKeywords.modify;
   const p = r.project;
   const rel = fileService.findKeywordDir(p.localDir, kw) || fileService.findKeywordDir(p.nasDir, kw);
   if (!rel) return res.status(400).json({ error: '未找到目录' });
@@ -297,47 +303,139 @@ router.get('/:id/monitor', (req, res) => {
   if (!r) return res.status(404).json({ error: '项目不存在' });
   const p = r.project;
   const target = p.episodeTarget || 0;
-  const result = { episodeTarget: target, status: target > 0 ? '监控中' : '未设置目标集数' };
+  const projectStatus = p.status || 'editing';
 
-  // 关键词目录（初版交付）
-  const kw = shared.settings.keyword || '项目归档资料';
-  const resolved = fileService.resolveEpisodeDirs(p, kw);
-  let foundNums = [];
-  if (resolved.relPath && resolved.localExists) {
-    result.archiveCount = countVideoFiles(resolved.localEpDir);
-    result.archivePath = resolved.localEpDir;
+  const result = {
+    episodeTarget: target,
+    projectStatus,
+    hasTarget: target > 0,
+  };
+
+  // ═══ 根据项目状态做不同检测 ═══
+
+  if (projectStatus === 'editing') {
+    // 🔵 剪辑中：检测关键词目录下的视频文件数 vs 目标集数
+    const kw = shared.settings.keyword || config.defaults.keyword;
+    const resolved = fileService.resolveEpisodeDirs(p, kw);
+    let foundNums = [];
+    if (resolved.relPath && resolved.localExists) {
+      result.archiveCount = countVideoFiles(resolved.localEpDir);
+      result.archivePath = resolved.localEpDir;
+      if (target > 0) {
+        foundNums = extractEpisodeNumbers(resolved.localEpDir);
+        result.archiveFoundNums = foundNums;
+        result.archiveMissing = findMissingEpisodes(foundNums, target);
+      }
+    }
     if (target > 0) {
-      foundNums = extractEpisodeNumbers(resolved.localEpDir);
-      result.archiveFoundNums = foundNums;
-      result.archiveMissing = findMissingEpisodes(foundNums, target);
+      result.missingByPerson = getMissingByPerson(foundNums, target, p.episodeAssignments);
+      const kwCount = result.archiveCount || 0;
+      result.progress = Math.min(100, Math.round(kwCount / target * 100));
+      if (kwCount >= target) {
+        result.status = '可交付';
+        result.archiveReady = true;
+      } else {
+        result.status = '剪辑中 · ' + kwCount + '/' + target + '集';
+      }
+    } else {
+      result.status = '未设置目标集数';
     }
   }
-  // 按人员分组缺失（无论目录是否存在都计算）
-  if (target > 0) {
-    result.missingByPerson = getMissingByPerson(foundNums, target, p.episodeAssignments);
+
+  else if (projectStatus === 'modifying') {
+    // 🟠 修改中：检测"上映单集版"目录下待交付的修改批次
+    const modifyRel = fileService.findKeywordDir(p.localDir, config.deliveryKeywords.modify)
+                   || fileService.findKeywordDir(p.nasDir, config.deliveryKeywords.modify);
+    result.modifyRelPath = modifyRel || null;
+    if (modifyRel) {
+      const localModifyDir = path.join(p.localDir, modifyRel);
+      const nasModifyDir = path.join(p.nasDir, modifyRel);
+      result.localModifyDir = localModifyDir;
+      result.nasModifyDir = nasModifyDir;
+      if (fs.existsSync(localModifyDir)) {
+        // 列出所有日期批次目录
+        let dirs = [];
+        try {
+          dirs = fs.readdirSync(localModifyDir, { withFileTypes: true })
+            .filter(d => d.isDirectory())
+            .sort((a, b) => b.name.localeCompare(a.name));
+        } catch (_) {}
+        const batches = [];
+        for (const d of dirs) {
+          const nasDir = path.join(nasModifyDir, d.name);
+          const hasNas = fs.existsSync(nasDir);
+          const fileCount = fileService.countFilesRecursive(path.join(localModifyDir, d.name));
+          const videoCount = countVideoFilesRecursive(path.join(localModifyDir, d.name));
+          batches.push({
+            name: d.name,
+            fileCount,
+            videoCount,
+            nasExists: hasNas,
+            pending: !hasNas,
+          });
+        }
+        result.modifyBatches = batches;
+        result.modifyPendingCount = batches.filter(b => b.pending).length;
+        result.modifyTotalCount = batches.length;
+        result.modifyReady = result.modifyPendingCount > 0;
+        result.status = result.modifyPendingCount > 0
+          ? result.modifyPendingCount + ' 个批次待交付'
+          : '全部批次已交付';
+        if (target > 0) {
+          result.modifyVideoTotal = batches.reduce((s, b) => s + b.videoCount, 0);
+        }
+      }
+    } else {
+      result.status = '未找到修改交付目录';
+    }
   }
 
-  // 上映单集版（修改交付）
-  const modifyRel = fileService.findKeywordDir(p.localDir, '上映单集版') || fileService.findKeywordDir(p.nasDir, '上映单集版');
-  if (modifyRel && fs.existsSync(path.join(p.localDir, modifyRel))) {
-    result.modifyCount = countVideoFilesRecursive(path.join(p.localDir, modifyRel));
-    result.modifyPath = path.join(p.localDir, modifyRel);
-  }
-
-  // 000交付
-  const d000Rel = fileService.findKeywordDir(p.localDir, '000交付') || fileService.findKeywordDir(p.nasDir, '000交付');
-  if (d000Rel && fs.existsSync(path.join(p.localDir, d000Rel))) {
-    result.d000Count = countVideoFilesRecursive(path.join(p.localDir, d000Rel));
-    result.d000Path = path.join(p.localDir, d000Rel);
-  }
-
-  // 判断达标
-  if (target > 0) {
-    const kwCount = result.archiveCount || 0;
-    result.progress = Math.min(100, Math.round(kwCount / target * 100));
-    if (kwCount >= target) { result.status = '可交付'; result.archiveReady = true; }
-    result.modifyReady = (result.modifyCount || 0) > 0;
-    result.d000Ready = (result.d000Count || 0) > 0;
+  else if (projectStatus === 'done') {
+    // ✅ 已完成：如果本地存在"000交付"目录，检测各版本达到多少集
+    const d000Rel = fileService.findKeywordDir(p.localDir, config.deliveryKeywords.archive)
+                 || fileService.findKeywordDir(p.nasDir, config.deliveryKeywords.archive);
+    result.d000RelPath = d000Rel || null;
+    if (d000Rel) {
+      const localD000Dir = path.join(p.localDir, d000Rel);
+      const nasD000Dir = path.join(p.nasDir, d000Rel);
+      result.localD000Dir = localD000Dir;
+      result.nasD000Dir = nasD000Dir;
+      if (fs.existsSync(localD000Dir)) {
+        let dirs = [];
+        try {
+          dirs = fs.readdirSync(localD000Dir, { withFileTypes: true })
+            .filter(d => d.isDirectory())
+            .sort((a, b) => b.name.localeCompare(a.name));
+        } catch (_) {}
+        const versions = [];
+        for (const d of dirs) {
+          const nasDir = path.join(nasD000Dir, d.name);
+          const hasNas = fs.existsSync(nasDir);
+          const videoCount = countVideoFilesRecursive(path.join(localD000Dir, d.name));
+          const isComplete = target > 0 ? videoCount >= target : false;
+          versions.push({
+            name: d.name,
+            videoCount,
+            isComplete,
+            nasExists: hasNas,
+            pending: !hasNas,
+            pct: target > 0 ? Math.min(100, Math.round(videoCount / target * 100)) : 0,
+          });
+        }
+        result.d000Versions = versions;
+        result.d000PendingCount = versions.filter(v => v.pending).length;
+        result.d000CompleteCount = versions.filter(v => v.isComplete).length;
+        result.status = target > 0
+          ? result.d000CompleteCount + '/' + versions.length + ' 个版本已达标'
+          : versions.length + ' 个交付版本';
+        if (target > 0 && versions.length > 0 && result.d000CompleteCount === versions.length) {
+          result.d000AllReady = true;
+          result.status = '✅ 全部版本已达标可交付';
+        }
+      }
+    } else {
+      result.status = '未找到000交付目录';
+    }
   }
 
   res.json(result);

@@ -1,13 +1,14 @@
 const fs = require('fs');
 const path = require('path');
+const config = require('../config');
 
 // ---------- 统一数据目录 ----------
-const dataDir = path.join(__dirname, '..', '..', 'data');
+const dataDir = config.dataDir;
 const projectsFile = path.join(dataDir, 'projects.json');
 const settingsFile = path.join(dataDir, 'settings.json');
 
 // ---------- 默认设置 ----------
-const DEFAULT_SETTINGS = { keyword: '项目归档资料', templates: [] };
+const DEFAULT_SETTINGS = { keyword: config.defaults.keyword, templates: [] };
 
 // ---------- 工具函数 ----------
 function ensureDir(dir) {
@@ -27,11 +28,26 @@ function readJSON(filePath, fallback) {
 
 function writeJSON(filePath, data) {
   ensureDir(path.dirname(filePath));
+  // 原子写入：先写临时文件，再重命名，避免写入中途崩溃损坏数据
+  const tmpFile = filePath + '.tmp';
   try {
-    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+    fs.writeFileSync(tmpFile, JSON.stringify(data, null, 2), 'utf-8');
+    fs.renameSync(tmpFile, filePath);
   } catch (e) {
     console.error(`[projectService] 写入 ${filePath} 失败:`, e.message);
+    try { if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile); } catch (_) {}
   }
+}
+
+// ---------- 简易互斥锁（序列化写入，避免并发问题）----------
+let _writeQueue = Promise.resolve();
+
+function serializedWrite(writeFn) {
+  _writeQueue = _writeQueue.then(() => new Promise((resolve) => {
+    try { writeFn(); } catch (e) { console.error('[projectService] 序列化写入异常:', e.message); }
+    resolve();
+  }));
+  return _writeQueue;
 }
 
 // ---------- Project CRUD ----------
@@ -40,7 +56,9 @@ function loadProjects() {
 }
 
 function saveProjects(projects) {
-  writeJSON(projectsFile, projects);
+  // 浅拷贝一份快照，避免串行化期间外部修改
+  const snapshot = [...projects];
+  serializedWrite(() => writeJSON(projectsFile, snapshot));
 }
 
 function loadSettings() {
@@ -48,12 +66,13 @@ function loadSettings() {
 }
 
 function saveSettings(settings) {
-  writeJSON(settingsFile, settings);
+  const snapshot = { ...settings };
+  serializedWrite(() => writeJSON(settingsFile, snapshot));
 }
 
 // ---------- 交付历史 ----------
 const deliveryLogFile = path.join(dataDir, 'delivery-log.json');
-const MAX_LOG_ENTRIES = 500;
+const MAX_LOG_ENTRIES = config.defaults.maxLogEntries;
 
 function loadDeliveryLog() {
   return readJSON(deliveryLogFile, []);
@@ -72,7 +91,7 @@ function addDeliveryLog(projectName, projectId, action, detail, ok, fail) {
   });
   // 保留最近 500 条
   if (logs.length > MAX_LOG_ENTRIES) logs.length = MAX_LOG_ENTRIES;
-  writeJSON(deliveryLogFile, logs);
+  serializedWrite(() => writeJSON(deliveryLogFile, logs));
 }
 
 // ---------- 导出 ----------

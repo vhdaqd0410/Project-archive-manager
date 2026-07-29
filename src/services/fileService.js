@@ -1,6 +1,8 @@
 const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
+const config = require('../config');
+const log = require('./logger').createLogger('fileService');
 
 // ---------- 递归查找含关键词的目录（BFS搜索，优先浅层）----------
 function findKeywordDir(root, keyword) {
@@ -9,18 +11,16 @@ function findKeywordDir(root, keyword) {
     const rootFull = path.resolve(root);
 
     function searchRecursive(dir, depth) {
-      if (depth > 10) return null; // 安全深度限制
+      if (depth > config.fileOps.searchMaxDepth) return null;
       let entries;
       try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
-      catch { return null; }
+      catch (e) { log.warn('读取目录失败:', dir, e.message); return null; }
 
-      // 第一遍：检查当前层级是否有匹配目录
       for (const entry of entries) {
         if (entry.isDirectory() && entry.name.includes(keyword)) {
           return path.join(dir, entry.name);
         }
       }
-      // 第二遍：递归进入子目录
       for (const entry of entries) {
         if (entry.isDirectory()) {
           const found = searchRecursive(path.join(dir, entry.name), depth + 1);
@@ -33,7 +33,8 @@ function findKeywordDir(root, keyword) {
     const found = searchRecursive(rootFull, 0);
     if (!found) return null;
     return found.substring(rootFull.length).replace(/\\/g, '/').replace(/^\//, '');
-  } catch {
+  } catch (e) {
+    log.warn('findKeywordDir 异常:', root, keyword, e.message);
     return null;
   }
 }
@@ -45,7 +46,28 @@ function countFilesInDir(dirPath) {
     return fs.readdirSync(dirPath).filter(f =>
       fs.statSync(path.join(dirPath, f)).isFile()
     ).length;
-  } catch { return 0; }
+  } catch (e) {
+    log.warn('countFilesInDir 失败:', dirPath, e.message);
+    return 0;
+  }
+}
+
+// ---------- 递归统计文件数 ----------
+function countFilesRecursive(dirPath) {
+  if (!dirPath || !fs.existsSync(dirPath)) return 0;
+  let count = 0;
+  try {
+    for (const entry of fs.readdirSync(dirPath, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        count += countFilesRecursive(path.join(dirPath, entry.name));
+      } else if (entry.isFile()) {
+        count++;
+      }
+    }
+  } catch (e) {
+    log.warn('countFilesRecursive 失败:', dirPath, e.message);
+  }
+  return count;
 }
 
 // ---------- 解析关键词目录（本地 + NAS）----------
@@ -85,7 +107,10 @@ function getPendingFiles(localDir, nasDir) {
     localFiles = fs.readdirSync(localDir).filter(f =>
       fs.statSync(path.join(localDir, f)).isFile()
     );
-  } catch { return []; }
+  } catch (e) {
+    log.warn('getPendingFiles 读取本地目录失败:', localDir, e.message);
+    return [];
+  }
 
   const nasNames = new Set();
   if (nasDir && fs.existsSync(nasDir)) {
@@ -93,7 +118,9 @@ function getPendingFiles(localDir, nasDir) {
       fs.readdirSync(nasDir).filter(f =>
         fs.statSync(path.join(nasDir, f)).isFile()
       ).forEach(f => nasNames.add(f));
-    } catch { /* 忽略 NAS 读取错误 */ }
+    } catch (e) {
+      log.warn('getPendingFiles 读取NAS目录失败:', nasDir, e.message);
+    }
   }
 
   return localFiles.filter(f => !nasNames.has(f));

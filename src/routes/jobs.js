@@ -1,6 +1,7 @@
 // 后台任务系统：创建、进度更新、状态查询、取消
 
 const crypto = require('crypto');
+const config = require('../config');
 const runningJobs = {};
 
 function createJob(projectId, projectName, totalItems, type) {
@@ -14,9 +15,10 @@ function createJob(projectId, projectName, totalItems, type) {
   };
   runningJobs[jobId] = job;
   const keys = Object.keys(runningJobs);
-  if (keys.length > 20) {
+  if (keys.length > config.defaults.maxRunningJobs) {
     const doneKeys = keys.filter(k => runningJobs[k].status === 'done');
-    for (const k of doneKeys.slice(0, doneKeys.length - 5)) delete runningJobs[k];
+    const toRemove = Math.max(0, doneKeys.length - config.defaults.maxKeptDoneJobs);
+    for (const k of doneKeys.slice(0, toRemove)) delete runningJobs[k];
   }
   return job;
 }

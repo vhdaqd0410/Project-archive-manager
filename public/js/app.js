@@ -92,21 +92,21 @@ async function batchDelete() {
 }
 
 // ==================== 状态快速切换 ====================
-var _statusTargetIdx = -1;
+let _statusTargetIdx = -1;
 function toggleStatusMenu(e, pid, idx) {
   e.stopPropagation();
   _statusTargetIdx = idx;
-  var drop = document.getElementById('statusDrop');
-  var p = projects[idx];
-  var options = [
+  let drop = document.getElementById('statusDrop');
+  let p = projects[idx];
+  let options = [
     { value: 'editing', icon: '🔵', label: '剪辑中' },
     { value: 'modifying', icon: '🟠', label: '修改中' },
     { value: 'done', icon: '✅', label: '已完成' }
   ];
   drop.innerHTML = '';
-  for (var i = 0; i < options.length; i++) {
-    var opt = options[i];
-    var o = document.createElement('div');
+  for (let i = 0; i < options.length; i++) {
+    let opt = options[i];
+    let o = document.createElement('div');
     o.className = 'so' + (p.status === opt.value ? ' sel' : '');
     o.textContent = opt.icon + ' ' + opt.label;
     o.onclick = (function(val) {
@@ -115,15 +115,15 @@ function toggleStatusMenu(e, pid, idx) {
     drop.appendChild(o);
   }
   // 定位到按钮下方
-  var btn = e.currentTarget;
-  var rect = btn.getBoundingClientRect();
+  let btn = e.currentTarget;
+  let rect = btn.getBoundingClientRect();
   drop.style.left = rect.left + 'px';
   drop.style.top = (rect.bottom + 2) + 'px';
   drop.classList.add('show');
 }
 
 async function setProjectStatus(idx, status) {
-  var drop = document.getElementById('statusDrop');
+  let drop = document.getElementById('statusDrop');
   drop.classList.remove('show');
   await api.put('/api/projects/' + idx + '/status', { status });
   projects[idx].status = status;
@@ -135,10 +135,10 @@ async function setProjectStatus(idx, status) {
 // ==================== 右键菜单 ====================
 function showContextMenu(e, idx) {
   selectProject(idx);
-  var drop = document.getElementById('statusDrop');
-  var p = projects[idx];
+  let drop = document.getElementById('statusDrop');
+  let p = projects[idx];
   drop.innerHTML = '';
-  var actions = [
+  let actions = [
     { label: '✏️ 编辑项目', action: function() { showProjectDlg(idx); } },
     { label: '🎯 设置目标集数', action: function() { setEpisodeTarget(idx); } },
     { label: '🗑 删除项目', action: function() { delProject(); } },
@@ -147,8 +147,8 @@ function showContextMenu(e, idx) {
     { label: '📋 复制NAS路径', action: function() { copyText(p.nasDir); } },
     { label: '📋 复制交付信息', action: function() { selectProject(idx); setTimeout(copyDeliveryMsg, 100); } }
   ];
-  for (var i = 0; i < actions.length; i++) {
-    var o = document.createElement('div');
+  for (let i = 0; i < actions.length; i++) {
+    let o = document.createElement('div');
     o.className = 'so';
     o.textContent = actions[i].label;
     o.onclick = (function(fn) { return function(ev) { ev.stopPropagation(); drop.classList.remove('show'); fn(); }; })(actions[i].action);
@@ -173,17 +173,17 @@ window.addEventListener('resize', function() {
 });
 
 // ==================== 搜索防抖 ====================
-var _searchTimer = null;
+let _searchTimer = null;
 function debounceSearch() {
   if (_searchTimer) clearTimeout(_searchTimer);
   _searchTimer = setTimeout(function() { renderProjectList(); }, 200);
 }
 
 // ==================== 排序切换 ====================
-var _sortBy = 'time'; // 'time' | 'name'
+let _sortBy = 'time'; // 'time' | 'name'
 function toggleSort() {
   _sortBy = _sortBy === 'time' ? 'name' : 'time';
-  var btn = document.getElementById('sortBtn');
+  let btn = document.getElementById('sortBtn');
   if (btn) btn.textContent = _sortBy === 'time' ? '🕐' : '🔤';
   renderProjectList();
 }
@@ -211,7 +211,7 @@ function renderProjectList() {
     { label: '🟠 修改中', key: 'modifying' },
     { label: '✅ 已完成', key: 'done' }
   ];
-  var total = 0, doneTotal = 0;
+  let total = 0, doneTotal = 0;
   for (const cfg of groupConfig) {
     renderGroup(list, cfg, groups[cfg.key]);
     total += groups[cfg.key].length;
@@ -219,7 +219,7 @@ function renderProjectList() {
   }
   $('projectCount').textContent = projects.length;
   // 更新统计
-  var statEl = document.getElementById('projectStats');
+  let statEl = document.getElementById('projectStats');
   if (statEl) statEl.textContent = '共 ' + total + ' 个 · ' + doneTotal + ' 已完成';
 }
 
@@ -357,13 +357,13 @@ async function refreshPending() {
   if (!resolved || !resolved.relPath || !resolved.localExists) return;
   const data = await api.get('/api/projects/' + sel + '/pending?keyword=' + encodeURIComponent($('keywordInput').value || '项目归档资料'));
   const files = data.files || [];
-  var countLabel = files.length + ' 个';
+  let countLabel = files.length + ' 个';
   // 顺便取 monitor 数据展示缺集信息
   try {
     const mon = await api.get('/api/projects/' + sel + '/monitor');
     if (mon.archiveMissing && mon.archiveMissing.hasMissing) {
-      var ranges = mon.archiveMissing.ranges || [];
-      var tip = ranges.length <= 6 ? ranges.join(', ') : ranges.slice(0, 5).join(', ') + '…';
+      let ranges = mon.archiveMissing.ranges || [];
+      let tip = ranges.length <= 6 ? ranges.join(', ') : ranges.slice(0, 5).join(', ') + '…';
       countLabel += ' <span style="color:#f97316;font-size:11px;font-weight:400">少' + mon.archiveMissing.missingCount + '集：' + tip + '</span>';
     }
   } catch(e) {}
@@ -446,8 +446,8 @@ function showProjectDlg(editIdx) {
   ensureFolderDatalist('dlgLocal'); refreshFolderDatalist('dlgLocal');
   ensureFolderDatalist('dlgNas'); refreshFolderDatalist('dlgNas');
   // 初始化已有集数分配
-  var assigns = p.episodeAssignments || [];
-  for (var ai = 0; ai < assigns.length; ai++) {
+  let assigns = p.episodeAssignments || [];
+  for (let ai = 0; ai < assigns.length; ai++) {
     addEpisodeAssign(assigns[ai].name, assigns[ai].start, assigns[ai].end);
   }
 }
@@ -473,20 +473,20 @@ async function saveProject(editIdx) {
 
 
 function collectEpisodeAssignments() {
-  var rows = document.querySelectorAll('#dlgAssignList .assign-row');
-  var list = [];
+  let rows = document.querySelectorAll('#dlgAssignList .assign-row');
+  let list = [];
   rows.forEach(function(r) {
-    var name = (r.querySelector('.assign-name') || {}).value || '';
-    var start = parseInt((r.querySelector('.assign-start') || {}).value) || 0;
-    var end = parseInt((r.querySelector('.assign-end') || {}).value) || 0;
+    let name = (r.querySelector('.assign-name') || {}).value || '';
+    let start = parseInt((r.querySelector('.assign-start') || {}).value) || 0;
+    let end = parseInt((r.querySelector('.assign-end') || {}).value) || 0;
     if (name && start > 0 && end >= start) list.push({ name: name, start: start, end: end });
   });
   return list;
 }
 
 function addEpisodeAssign(name, start, end) {
-  var list = document.getElementById('dlgAssignList'); if (!list) return;
-  var div = document.createElement('div');
+  let list = document.getElementById('dlgAssignList'); if (!list) return;
+  let div = document.createElement('div');
   div.className = 'assign-row';
   div.style.cssText = 'display:flex;gap:4px;align-items:center;margin-bottom:4px';
   div.innerHTML = '<input class="assign-name" placeholder="剪辑人员" value="' + escAttr(name||'') + '" style="flex:2;border:1px solid #475569;border-radius:5px;background:#1e293b;color:#e2e8f0;padding:4px 8px;font-size:12px;outline:none">' +
@@ -501,14 +501,14 @@ function addEpisodeAssign(name, start, end) {
 
 // 从分配信息中提取最大集数，自动填入目标集数
 function syncEpisodeTargetFromAssignments() {
-  var rows = document.querySelectorAll('#dlgAssignList .assign-row');
-  var maxEp = 0;
+  let rows = document.querySelectorAll('#dlgAssignList .assign-row');
+  let maxEp = 0;
   rows.forEach(function(r) {
-    var e = parseInt((r.querySelector('.assign-end') || {}).value) || 0;
+    let e = parseInt((r.querySelector('.assign-end') || {}).value) || 0;
     if (e > maxEp) maxEp = e;
   });
   if (maxEp > 0) {
-    var targetEl = document.getElementById('dlgEpisodeTarget');
+    let targetEl = document.getElementById('dlgEpisodeTarget');
     if (targetEl && (!targetEl.value || parseInt(targetEl.value) < maxEp)) {
       targetEl.value = maxEp;
       targetEl.style.borderColor = '#22c55e';
@@ -520,39 +520,39 @@ function syncEpisodeTargetFromAssignments() {
 // 解析粘贴的集数分配文本
 // 格式："杨永芳：1-2，69-70\n程梦：3-4, 67-68"
 function parseAssignPaste() {
-  var el = document.getElementById('dlgAssignPaste'); if (!el) return;
-  var raw = el.value.trim(); if (!raw) { toast('请先粘贴内容', 'warn'); return; }
+  let el = document.getElementById('dlgAssignPaste'); if (!el) return;
+  let raw = el.value.trim(); if (!raw) { toast('请先粘贴内容', 'warn'); return; }
   // 清空已有
-  var list = document.getElementById('dlgAssignList');
+  let list = document.getElementById('dlgAssignList');
   list.innerHTML = '';
   // 按行分割
-  var lines = raw.split(/[\n\r]+/).filter(function(l) { return l.trim(); });
-  var count = 0;
-  for (var li = 0; li < lines.length; li++) {
-    var line = lines[li].trim();
+  let lines = raw.split(/[\n\r]+/).filter(function(l) { return l.trim(); });
+  let count = 0;
+  for (let li = 0; li < lines.length; li++) {
+    let line = lines[li].trim();
     // 分割 人名：后面的部分
-    var colonIdx = line.indexOf('：');
+    let colonIdx = line.indexOf('：');
     if (colonIdx < 0) colonIdx = line.indexOf(':');
     if (colonIdx < 0) continue;
-    var name = line.substring(0, colonIdx).trim();
-    var rest = line.substring(colonIdx + 1).trim();
+    let name = line.substring(0, colonIdx).trim();
+    let rest = line.substring(colonIdx + 1).trim();
     if (!name || !rest) continue;
     // 解析集数区间：1-2，69-70 或 5-6,65-66
-    var segs = rest.split(/[,，、]/);
-    for (var si = 0; si < segs.length; si++) {
-      var seg = segs[si].trim().replace(/[（(第]\s*第?/g, '').replace(/[\s集）/]/g, '');
-      var dash = seg.indexOf('-');
+    let segs = rest.split(/[,，、]/);
+    for (let si = 0; si < segs.length; si++) {
+      let seg = segs[si].trim().replace(/[（(第]\s*第?/g, '').replace(/[\s集）/]/g, '');
+      let dash = seg.indexOf('-');
       if (dash < 0) { dash = seg.indexOf('—'); }
       if (dash < 0) { dash = seg.indexOf('~'); }
       if (dash < 0) { dash = seg.indexOf('到'); }
       if (dash < 0) {
         // 单集：纯数字
-        var n = parseInt(seg);
+        let n = parseInt(seg);
         if (!isNaN(n)) { addEpisodeAssign(name, n, n); count++; }
         continue;
       }
-      var s = parseInt(seg.substring(0, dash));
-      var e = parseInt(seg.substring(dash + 1));
+      let s = parseInt(seg.substring(0, dash));
+      let e = parseInt(seg.substring(dash + 1));
       if (!isNaN(s) && !isNaN(e)) {
         addEpisodeAssign(name, Math.min(s, e), Math.max(s, e));
         count++;
@@ -580,10 +580,10 @@ async function delProject() {
 // ==================== 快速设置目标集数 ====================
 async function setEpisodeTarget(idx) {
   if (idx < 0 || idx >= projects.length) return;
-  var cur = projects[idx].episodeTarget || '';
-  var val = prompt('请输入目标集数（当前：' + (cur || '未设置') + '）\n设定后集数监控卡片将实时追踪交付进度', cur);
+  let cur = projects[idx].episodeTarget || '';
+  let val = prompt('请输入目标集数（当前：' + (cur || '未设置') + '）\n设定后集数监控卡片将实时追踪交付进度', cur);
   if (val === null) return;
-  var num = parseInt(val);
+  let num = parseInt(val);
   if (isNaN(num) || num < 0) { alert('请输入有效数字'); return; }
   await api.put('/api/projects/' + idx, { episodeTarget: num, name: projects[idx].name });
   projects = await api.get('/api/projects');
@@ -697,18 +697,18 @@ async function copy000Delivery() {
 }
 
 // ==================== 进度条系统（实时文件级 + ETA + 多任务监控）====================
-var _currentJobId = null;
-var _pollTimer = null;
-var _jobStartTime = 0;
+let _currentJobId = null;
+let _pollTimer = null;
+let _fsProgressBytes = 0;
 
 function formatBytes(b) { return b >= 1073741824 ? (b/1073741824).toFixed(1)+'GB' : b>=1048576 ? (b/1048576).toFixed(1)+'MB' : b>=1024 ? (b/1024).toFixed(1)+'KB' : b+'B'; }
-function formatETA(sec) { if (sec<=0) return ''; var m=Math.floor(sec/60),s=Math.floor(sec%60); return '预计剩余 '+(m>0?m+'分':'')+s+'秒'; }
+function formatETA(sec) { if (sec<=0) return ''; let m=Math.floor(sec/60),s=Math.floor(sec%60); return '预计剩余 '+(m>0?m+'分':'')+s+'秒'; }
 
 function startProgress(title, total) {
   _currentJobId = null;
   if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
   _jobStartTime = Date.now();
-  var panel = document.getElementById('progressPanel');
+  let panel = document.getElementById('progressPanel');
   document.getElementById('progTitle').textContent = title;
   document.getElementById('progFill').style.width = '0%';
   document.getElementById('progPct').textContent = '0%';
@@ -719,30 +719,30 @@ function startProgress(title, total) {
 }
 
 function updateProgressUI(job) {
-  var pct = job.totalItems > 0 ? Math.round(job.current / job.totalItems * 100) : 0;
+  let pct = job.totalItems > 0 ? Math.round(job.current / job.totalItems * 100) : 0;
   document.getElementById('progFill').style.width = pct + '%';
   document.getElementById('progPct').textContent = pct + '%';
 
-  var item = job.currentItem || {};
+  let item = job.currentItem || {};
   document.getElementById('progFile').textContent = '「' + (item.name || '...') + '」' + (job.current || 0) + '/' + job.totalItems;
 
   // 速度 + ETA
-  var elapsed = job.elapsed || (Date.now() - _jobStartTime);
-  var speedText = '', etaText = '';
+  let elapsed = job.elapsed || (Date.now() - _jobStartTime);
+  let speedText = '', etaText = '';
   if (elapsed > 500 && job.totalBytes > 0) {
-    var mb = job.totalBytes / 1048576, sec = elapsed / 1000;
+    let mb = job.totalBytes / 1048576, sec = elapsed / 1000;
     speedText = (mb/sec).toFixed(1) + ' MB/s';
   }
   if (job.current > 0 && job.status === 'running') {
-    var avgMs = elapsed / job.current;
-    var remain = avgMs * (job.totalItems - job.current);
+    let avgMs = elapsed / job.current;
+    let remain = avgMs * (job.totalItems - job.current);
     etaText = formatETA(remain / 1000);
   }
   document.getElementById('progSpeed').textContent = speedText;
   document.getElementById('progETA').textContent = etaText;
 
   // 状态栏
-  var stats = job.completed + ' ✓ ';
+  let stats = job.completed + ' ✓ ';
   if (job.skipped > 0) stats += '| ' + job.skipped + ' 跳过 ';
   if (job.failed > 0) stats += '| ' + job.failed + ' ✗ ';
   document.getElementById('progStats').textContent = stats;
@@ -775,13 +775,13 @@ async function pollJob(jobId) {
   return new Promise(function(resolve) {
     _pollTimer = setInterval(async function() {
       try {
-        var job = await api.get('/api/jobs/' + jobId);
+        let job = await api.get('/api/jobs/' + jobId);
         updateProgressUI(job);
 
         if (job.status === 'done' || job.status === 'cancelled' || job.status === 'error') {
           clearInterval(_pollTimer); _pollTimer = null; _currentJobId = null;
           document.getElementById('jobIndicator').style.display = 'none';
-          var extra = '';
+          let extra = '';
           if (job.status === 'done') { extra = '成功' + job.completed + (job.skipped>0?'/跳过'+job.skipped:'') + (job.failed>0?'/失败'+job.failed:''); addLog('✅ 完成：' + extra); }
           else if (job.status === 'cancelled') { addLog('⏸ 已取消'); }
           else { addLog('❌ 出错：' + (job.error||'')); }
@@ -812,10 +812,10 @@ function hideProgress() {
 }
 
 // ==================== 后台任务面板 ====================
-var _dashboardTimer = null;
+let _dashboardTimer = null;
 
 function showDashboard() {
-  var panel = document.getElementById('dashboardPanel');
+  let panel = document.getElementById('dashboardPanel');
   if (panel.classList.contains('show')) { panel.classList.remove('show'); if (_dashboardTimer) clearInterval(_dashboardTimer); return; }
   panel.classList.add('show');
   refreshDashboard();
@@ -824,15 +824,15 @@ function showDashboard() {
 
 async function refreshDashboard() {
   try {
-    var jobs = await api.get('/api/jobs');
-    var el = document.getElementById('dashboardBody');
+    let jobs = await api.get('/api/jobs');
+    let el = document.getElementById('dashboardBody');
     if (!el) return;
     if (!jobs.length) { el.innerHTML = '<div style="color:#94a3b8;font-size:12px;padding:8px">暂无后台任务</div>'; return; }
-    var html = '';
-    for (var j of jobs) {
-      var pct = j.totalItems > 0 ? Math.round(j.current/j.totalItems*100) : 0;
-      var elapsed = j.elapsed ? formatETA(j.elapsed/1000) : '';
-      var bg = j.status==='done'?'#22c55e':j.status==='cancelled'?'#94a3b8':j.status==='error'?'#ef4444':'#3b82f6';
+    let html = '';
+    for (let j of jobs) {
+      let pct = j.totalItems > 0 ? Math.round(j.current/j.totalItems*100) : 0;
+      let elapsed = j.elapsed ? formatETA(j.elapsed/1000) : '';
+      let bg = j.status==='done'?'#22c55e':j.status==='cancelled'?'#94a3b8':j.status==='error'?'#ef4444':'#3b82f6';
       html += '<div style="margin-bottom:8px;border-bottom:1px solid #334155;padding-bottom:6px">' +
         '<div style="display:flex;justify-content:space-between"><strong style="font-size:12px;color:#e2e8f0">' + esc(j.projectName||'') + '</strong><span style="font-size:10px;color:#94a3b8">' + esc(j.type) + '</span></div>' +
         '<div style="font-size:11px;color:#94a3b8">' + j.current + '/' + j.totalItems + ' · ' + j.completed + '✓ ' + (j.skipped>0?j.skipped+'跳过 ':'') + (j.failed>0?j.failed+'✗ ':'') + '</div>' +
@@ -842,14 +842,14 @@ async function refreshDashboard() {
         '</div>';
     }
     el.innerHTML = html;
-    var badge = document.getElementById('dashboardBadge');
-    if (badge) { var active = jobs.filter(function(j){return j.status==='running'}).length; badge.textContent = active>0?active:''; badge.style.display = active>0?'inline':'none'; }
+    let badge = document.getElementById('dashboardBadge');
+    if (badge) { let active = jobs.filter(function(j){return j.status==='running'}).length; badge.textContent = active>0?active:''; badge.style.display = active>0?'inline':'none'; }
   } catch(e) {}
 }
 
 // 点击标题栏任务指示器打开后台面板
 document.addEventListener('DOMContentLoaded', function() {
-  var ji = document.getElementById('jobIndicator');
+  let ji = document.getElementById('jobIndicator');
   if (ji) ji.onclick = showDashboard;
 });
 
@@ -863,7 +863,7 @@ window.addEventListener('beforeunload', function(e) {
 });
 
 // selectProject 时检测后台任务
-var _origSelectProject = selectProject;
+const _origSelectProject = selectProject;
 selectProject = function(idx) {
   if (_currentJobId && idx !== sel) {
     if (!confirm('⏳ 后台任务正在进行中！\n\n切换项目不会中断后台复制任务，但右侧面板会变为新项目内容。\n点击标题栏的 ⏳ 指示器可以随时查看进度。\n\n确定要切换吗？')) return;
@@ -891,7 +891,7 @@ async function refreshHistory() {
 }
 
 // ==================== 文件夹浏览（系统原生 Shell 对话框） ====================
-var _folderHistory = [];
+
 try { _folderHistory = JSON.parse(localStorage.getItem('pam-folder-history') || '[]'); } catch(e) { _folderHistory = []; }
 
 function saveFolderHistory(pathVal) {
@@ -903,23 +903,23 @@ function saveFolderHistory(pathVal) {
 
 // 为输入框添加历史 datalist（每个输入框一个，id = inputId + '_hist'）
 function ensureFolderDatalist(inputId) {
-  var input = document.getElementById(inputId);
+  let input = document.getElementById(inputId);
   if (!input) return;
-  var listId = inputId + '_hist';
+  let listId = inputId + '_hist';
   if (document.getElementById(listId)) return;
-  var dl = document.createElement('datalist');
+  let dl = document.createElement('datalist');
   dl.id = listId;
   document.body.appendChild(dl);
   input.setAttribute('list', listId);
 }
 
 function refreshFolderDatalist(inputId) {
-  var listId = inputId + '_hist';
-  var dl = document.getElementById(listId);
+  let listId = inputId + '_hist';
+  let dl = document.getElementById(listId);
   if (!dl) return;
   dl.innerHTML = '';
-  for (var i = 0; i < _folderHistory.length; i++) {
-    var opt = document.createElement('option');
+  for (let i = 0; i < _folderHistory.length; i++) {
+    let opt = document.createElement('option');
     opt.value = _folderHistory[i];
     dl.appendChild(opt);
   }
@@ -927,7 +927,7 @@ function refreshFolderDatalist(inputId) {
 
 async function pickFolder(inputId) {
   try {
-    var r;
+    let r;
     // Electron 环境：用原生对话框（稳定、不依赖 VBS）
     if (window.electronAPI && window.electronAPI.isElectron) {
       r = await window.electronAPI.pickFolder();
@@ -935,7 +935,7 @@ async function pickFolder(inputId) {
       r = await api.post('/api/pick-folder', {});
     }
     if (r.success && r.path) {
-      var el = document.getElementById(inputId);
+      let el = document.getElementById(inputId);
       if (el) el.value = r.path;
       saveFolderHistory(r.path);
       refreshFolderDatalist(inputId);
@@ -994,10 +994,10 @@ function applyKeyword() {
 
 // ==================== 服务状态 & 重启 ====================
 async function refreshServerStatus() {
-  var el = document.getElementById('serverIndicator');
+  let el = document.getElementById('serverIndicator');
   if (!el) return;
   try {
-    var r = await api.get('/api/server/status');
+    let r = await api.get('/api/server/status');
     el.innerHTML = '<span style="color:#22c55e">🟢</span> 运行中'
       + ' <span style="color:#94a3b8;font-size:10px">PID ' + r.pid + ' · ' + r.uptime + '</span>';
     el.title = '启动时间: ' + r.startedAt + '\n端口: ' + r.port + '\n点击重启服务 · 右键关闭服务';
@@ -1014,20 +1014,20 @@ async function refreshServerStatus() {
 
 function showServerMenu(e, statusInfo) {
   e.stopPropagation();
-  var drop = document.getElementById('statusDrop');
+  let drop = document.getElementById('statusDrop');
   drop.innerHTML = '';
-  var items = [
+  let items = [
     { label: '🔄 重启服务', action: restartServer },
     { label: '⏹ 关闭服务并退出', action: stopServer }
   ];
-  for (var i = 0; i < items.length; i++) {
-    var o = document.createElement('div');
+  for (let i = 0; i < items.length; i++) {
+    let o = document.createElement('div');
     o.className = 'so';
     o.textContent = items[i].label;
     o.onclick = (function(fn) { return function(ev) { ev.stopPropagation(); drop.classList.remove('show'); fn(); }; })(items[i].action);
     drop.appendChild(o);
   }
-  var rect = e.currentTarget.getBoundingClientRect();
+  let rect = e.currentTarget.getBoundingClientRect();
   drop.style.left = rect.left + 'px';
   drop.style.top = (rect.bottom + 2) + 'px';
   drop.classList.add('show');
@@ -1036,10 +1036,10 @@ function showServerMenu(e, statusInfo) {
 async function restartServer() {
   if (!confirm('确定要重启服务？\n重启后页面将自动刷新，请等待约 3 秒。')) return;
   try {
-    var r = await api.post('/api/server/restart', {});
+    let r = await api.post('/api/server/restart', {});
     toast(r.message || '服务重启中...', 'warn');
-    var attempts = 0;
-    var check = setInterval(function() {
+    let attempts = 0;
+    let check = setInterval(function() {
       attempts++;
       document.getElementById('serverIndicator').innerHTML = '<span style="color:#f59e0b">🟡</span> 重启中 ' + attempts + '...';
       fetch('/api/server/status').then(function(res) {
@@ -1084,15 +1084,15 @@ window.alert = function(m) { toast(m, 'warn'); };
 
 // ==================== 暗色主题 ====================
 (function() {
-  var saved = localStorage.getItem('pam-theme');
+  let saved = localStorage.getItem('pam-theme');
   if (saved === 'dark') document.body.classList.add('dark');
-  var btn = document.getElementById('themeToggle');
+  let btn = document.getElementById('themeToggle');
   if (btn) btn.textContent = saved === 'dark' ? '☀️' : '🌙';
 })();
 function toggleTheme() {
-  var isDark = document.body.classList.toggle('dark');
+  let isDark = document.body.classList.toggle('dark');
   localStorage.setItem('pam-theme', isDark ? 'dark' : 'light');
-  var btn = document.getElementById('themeToggle');
+  let btn = document.getElementById('themeToggle');
   if (btn) btn.textContent = isDark ? '☀️' : '🌙';
 }
 
@@ -1131,25 +1131,98 @@ async function importBackup(input) {
   input.value = '';
 }
 
-// ==================== 键盘快捷键 ====================
+// ==================== 键盘快捷键（可自定义） ====================
+// 默认快捷键定义
+const DEFAULT_SHORTCUTS = {
+  'new-project':     { label: '新建项目',        keys: 'Ctrl+N',       ctrl: true,  key: 'n',       global: false },
+  'search-focus':    { label: '搜索项目',        keys: 'Ctrl+F',       ctrl: true,  key: 'f',       global: false },
+  'refresh-panel':   { label: '刷新面板',        keys: 'F5',           ctrl: false, key: 'F5',      global: false },
+  'delete-project':  { label: '删除项目',        keys: 'Delete',       ctrl: false, key: 'Delete',  global: false },
+  'close-modal':     { label: '关闭弹窗',        keys: 'Escape',       ctrl: false, key: 'Escape',  global: false },
+  'show-window':     { label: '呼出主窗口(全局)',  keys: 'Ctrl+Shift+D', ctrl: true,  key: 'd',       shift: true,  global: true  },
+};
+
+// 从 localStorage 加载快捷键
+function loadShortcuts() {
+  try {
+    const saved = localStorage.getItem('pam-shortcuts');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (typeof parsed === 'object') return parsed;
+    }
+  } catch (_) {}
+  return JSON.parse(JSON.stringify(DEFAULT_SHORTCUTS));
+}
+
+// 保存快捷键到 localStorage
+function saveShortcuts(sc) {
+  localStorage.setItem('pam-shortcuts', JSON.stringify(sc));
+}
+
+// 格式化按键为显示文本
+function formatKeyName(k) {
+  const map = { Ctrl: 'Ctrl', Shift: 'Shift', Alt: 'Alt', Meta: 'Win' };
+  return map[k] || (k.length === 1 ? k.toUpperCase() : k);
+}
+
+let _currentShortcuts = loadShortcuts();
+
 document.addEventListener('keydown', function(e) {
+  // 快捷键捕获模式下不触发普通快捷键
+  if (_capturingShortcutId) return;
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
-  if (e.ctrlKey || e.metaKey) {
-    if (e.key === 'n' || e.key === 'N') { e.preventDefault(); showProjectDlg(-1); }
-    else if (e.key === 'f' || e.key === 'F') { e.preventDefault(); var s = document.getElementById('searchInput'); if (s) s.focus(); }
+  const sc = _currentShortcuts;
+
+  // Ctrl+N → 新建项目
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === sc['new-project'].key.toLowerCase()) {
+    e.preventDefault(); showProjectDlg(-1); return;
   }
-  if (e.key === 'F5') { e.preventDefault(); if (sel >= 0) { refreshDetail(); refreshModify(); refresh000(); refreshHistory(); } }
-  if (e.key === 'Delete' && sel >= 0) { e.preventDefault(); delProject(); }
-  if (e.key === 'Escape') { e.preventDefault(); closeModal(); }
+  // Ctrl+F → 搜索
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === sc['search-focus'].key.toLowerCase()) {
+    e.preventDefault(); const s = document.getElementById('searchInput'); if (s) s.focus(); return;
+  }
+  // F5 → 刷新
+  if (e.key === sc['refresh-panel'].key) {
+    e.preventDefault(); if (sel >= 0) { refreshDetail(); refreshModify(); refresh000(); refreshHistory(); } return;
+  }
+  // Delete → 删除项目
+  if (e.key === sc['delete-project'].key && sel >= 0) {
+    e.preventDefault(); delProject(); return;
+  }
+  // Escape → 关闭弹窗
+  if (e.key === sc['close-modal'].key) {
+    e.preventDefault(); closeModal(); return;
+  }
+});
+
+// 全局呼出窗口快捷键（即使在输入框中也能触发）
+document.addEventListener('keydown', function(e) {
+  if (_capturingShortcutId) return;
+  const sc = _currentShortcuts;
+  const sw = sc['show-window'];
+  if (!sw) return;
+  const matchKey = sw.key.toLowerCase() === e.key.toLowerCase();
+  const needCtrl = sw.ctrl;
+  const hasCtrl = e.ctrlKey || e.metaKey;
+  const needShift = sw.shift;
+  const hasShift = e.shiftKey;
+  if (matchKey && hasCtrl === needCtrl && hasShift === needShift) {
+    e.preventDefault();
+    // 通过 Electron API 通知主进程呼出窗口
+    if (window.electronAPI && window.electronAPI.isElectron) {
+      window.electronAPI.sendMessage('global-show-window');
+    }
+    return;
+  }
 });
 
 // ==================== 请求超时封装 (2分钟) ====================
-var _apiFetch = async function(url, options) {
+async function _apiFetch(url, options) {
   options = options || {};
-  var controller = new AbortController();
-  var timeout = setTimeout(function() { controller.abort(); }, 120000);
+  let controller = new AbortController();
+  let timeout = setTimeout(function() { controller.abort(); }, 120000);
   try {
-    var res = await fetch(url, Object.assign({}, options, { signal: controller.signal }));
+    let res = await fetch(url, Object.assign({}, options, { signal: controller.signal }));
     return await res.json();
   } catch (e) {
     if (e.name === 'AbortError') throw new Error('请求超时（120秒）');
@@ -1178,14 +1251,14 @@ window.addEventListener('unhandledrejection', function(e) {
 // 拖放文件夹导入
 async function handleDropImport(dirPath) {
   try {
-    var r = await window.electronAPI.dropImport(dirPath);
+    const r = await window.electronAPI.dropImport(dirPath);
     if (!r.success) { toast(r.error || "导入失败", "error"); return; }
-    var existing = projects.find(function(p) { return p.localDir === r.path; });
+    const existing = projects.find(p => p.localDir === r.path);
     if (existing) { toast("项目已存在: " + existing.name, "warn"); return; }
     showProjectDlg(-1);
-    setTimeout(function() {
-      var nm = document.getElementById("dlgName"); if (nm) nm.value = r.name;
-      var ld = document.getElementById("dlgLocal"); if (ld) ld.value = r.path;
+    setTimeout(() => {
+      const nm = document.getElementById("dlgName"); if (nm) nm.value = r.name;
+      const ld = document.getElementById("dlgLocal"); if (ld) ld.value = r.path;
       saveFolderHistory(r.path);
       toast("已识别项目: " + r.name, "success");
     }, 300);
@@ -1195,20 +1268,238 @@ async function handleDropImport(dirPath) {
 // 菜单触发文件夹选择导入
 async function triggerFileDialog() {
   if (!window.electronAPI || !window.electronAPI.isElectron) { toast("请在桌面版使用", "warn"); return; }
-  var r = await window.electronAPI.pickFolder();
+  const r = await window.electronAPI.pickFolder();
   if (r.success && r.path) handleDropImport(r.path);
 }
 
-// 目录监听回调
-var _fsChangedTimer = null;
+// 文件系统变更回调（防抖 1.5s）
+let _fsChangedTimer = null;
 function onFsChanged(projectId) {
   if (_fsChangedTimer) clearTimeout(_fsChangedTimer);
-  _fsChangedTimer = setTimeout(function() {
+  _fsChangedTimer = setTimeout(() => {
     if (sel >= 0 && projects[sel] && projects[sel].id === projectId) {
       refreshDetail();
-      refreshMonitor(false);
+      manualRefreshMonitor();
       addLog("文件变化已自动刷新");
     }
     _fsChangedTimer = null;
   }, 1500);
+}
+
+// 注册安全的 Electron IPC 消息监听
+if (window.electronAPI && window.electronAPI.isElectron) {
+  window.electronAPI.onMessage('menu:new-project', () => showProjectDlg(-1));
+  window.electronAPI.onMessage('menu:import-folder', () => triggerFileDialog());
+  window.electronAPI.onMessage('menu:export-backup', () => exportBackup());
+  window.electronAPI.onMessage('menu:import-backup', () => document.getElementById('importFileInput').click());
+  window.electronAPI.onMessage('drop:import-folder', (fp) => handleDropImport(fp));
+  window.electronAPI.onMessage('fs:changed', (projectId) => onFsChanged(projectId));
+}
+
+// ==================== 设置弹窗 ====================
+async function showSettings() {
+  const mTitle = document.getElementById('modalTitle');
+  const mBody = document.getElementById('modalBody');
+  const mOverlay = document.getElementById('modalOverlay');
+  
+  mTitle.textContent = '⚙️ 应用设置';
+  
+  let autoStartChecked = false;
+  let appVersion = '';
+  // 如果是 Electron 桌面版，读取原生设置
+  if (window.electronAPI && window.electronAPI.isElectron) {
+    try {
+      const s = await window.electronAPI.getAppSettings();
+      autoStartChecked = s.autoStart;
+      appVersion = s.appVersion || '';
+    } catch (e) { /* 忽略 */ }
+  }
+  
+  mBody.innerHTML = 
+    '<div class="fg">' +
+      '<label>开机自启</label>' +
+      '<div style="display:flex;align-items:center;gap:8px;padding:6px 0">' +
+        '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;font-weight:400;color:#334155">' +
+          '<input type="checkbox" id="setAutoStart" ' + (autoStartChecked ? 'checked' : '') + ' style="accent-color:#3b82f6;width:16px;height:16px">' +
+          ' 系统启动时自动运行项目档案管理器' +
+        '</label>' +
+      '</div>' +
+    '</div>' +
+    '<div class="fg">' +
+      '<label>主题</label>' +
+      '<div style="display:flex;gap:6px">' +
+        '<button class="btn btn-outline" onclick="toggleTheme()">🌙 切换暗色/亮色主题</button>' +
+      '</div>' +
+    '</div>' +
+    '<div class="fg">' +
+      '<label>键盘快捷键 <span style="font-size:10px;color:#94a3b8">（点击右侧按钮重新绑定）</span></label>' +
+      '<div id="shortcutList" style="border:1px solid #e2e8f0;border-radius:7px;overflow:hidden">' +
+      '</div>' +
+    '</div>' +
+    '<div class="fg">' +
+      '<label>数据管理</label>' +
+      '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
+        '<button class="btn btn-outline" onclick="exportBackup()">📥 导出备份</button>' +
+        '<button class="btn btn-outline" onclick="document.getElementById(\'importFileInput\').click()">📤 导入备份</button>' +
+        '<button class="btn btn-outline" onclick="openFolder(\'' + (window.electronAPI && window.electronAPI.isElectron ? 'electron-data' : 'data') + '\')">📂 打开数据目录</button>' +
+      '</div>' +
+    '</div>' +
+    (appVersion ? '<div class="fg"><label>版本</label><span style="font-size:13px;color:#64748b">v' + esc(appVersion) + '</span></div>' : '') +
+    '<div class="fg" style="margin-bottom:0">' +
+      '<label>关于</label>' +
+      '<p style="font-size:12px;color:#64748b;line-height:1.6">项目档案管理器<br>项目档案交付 NAS 管理工具<br>支持初版交付、修改交付、000交付<br>集数监控 · 桌面通知 · 托盘最小化</p>' +
+    '</div>';
+  
+  // 绑定设置变化
+  setTimeout(() => {
+    const cb = document.getElementById('setAutoStart');
+    if (cb) {
+      cb.onchange = async function() {
+        if (window.electronAPI && window.electronAPI.isElectron) {
+          const r = await window.electronAPI.setAutoStart(this.checked);
+          if (r.success) toast('开机自启已' + (this.checked ? '开启' : '关闭'), 'success');
+          else toast('设置失败: ' + (r.error || '未知错误'), 'error');
+        } else {
+          toast('请在桌面版使用此功能', 'warn');
+          this.checked = !this.checked;
+        }
+      };
+    }
+    // 渲染快捷键列表
+    renderShortcutList();
+  }, 100);
+  
+  mOverlay.style.display = 'flex';
+}
+
+// ── 快捷键列表渲染 ──
+function renderShortcutList() {
+  const container = document.getElementById('shortcutList');
+  if (!container) return;
+  const sc = _currentShortcuts;
+  let html = '';
+  for (const [id, def] of Object.entries(sc)) {
+    const isGlobal = def.global;
+    html +=
+      '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-bottom:1px solid #f1f5f9;font-size:13px">' +
+        '<span style="color:#334155">' + esc(def.label) + (isGlobal ? ' <span style="font-size:10px;color:#3b82f6;background:#dbeafe;border-radius:3px;padding:1px 4px">全局</span>' : '') + '</span>' +
+        '<button class="btn btn-sm btn-outline" id="sc-btn-' + id + '" style="font-family:Consolas,monospace;min-width:80px;text-align:center" onclick="captureShortcut(\'' + id + '\')">' + esc(def.keys) + '</button>' +
+      '</div>';
+  }
+  html +=
+    '<div style="padding:8px 12px;border-bottom:1px solid #f1f5f9;font-size:12px;color:#94a3b8">💡 全局快捷键可在任何应用中呼出主窗口</div>' +
+    '<div style="padding:8px 12px;border-bottom:1px solid #f1f5f9;font-size:13px">' +
+      '<span style="color:#334155">恢复默认</span>' +
+      '<button class="btn btn-sm btn-outline" style="font-family:Consolas,monospace;float:right" onclick="resetShortcuts()">🔄 重置</button>' +
+    '</div>';
+  container.innerHTML = html;
+}
+
+// ── 捕获快捷键 ──
+let _capturingShortcutId = null;
+
+function captureShortcut(id) {
+  const btn = document.getElementById('sc-btn-' + id);
+  if (!btn) return;
+  if (_capturingShortcutId === id) {
+    // 取消捕获
+    _capturingShortcutId = null;
+    btn.textContent = _currentShortcuts[id].keys;
+    btn.style.borderColor = '';
+    btn.style.background = '';
+    return;
+  }
+  // 开始捕获
+  _capturingShortcutId = id;
+  btn.textContent = '按下按键...';
+  btn.style.borderColor = '#3b82f6';
+  btn.style.background = '#eff6ff';
+}
+
+// 全局快捷键捕获（设置弹窗打开期间有效）
+document.addEventListener('keydown', function _scCapture(e) {
+  if (!_capturingShortcutId) return;
+  e.preventDefault();
+  e.stopPropagation();
+
+  const id = _capturingShortcutId;
+  const ctrl = e.ctrlKey || e.metaKey;
+  const shift = e.shiftKey;
+  const alt = e.altKey;
+
+  // 忽略纯修饰键
+  if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) return;
+
+  const key = e.key;
+  // 组合键用于全局快捷键（Ctrl+Shift+X 等）
+  const parts = [];
+  if (ctrl) parts.push('Ctrl');
+  if (alt) parts.push('Alt');
+  if (shift) parts.push('Shift');
+  if (key.length === 1) parts.push(key.toUpperCase());
+  else parts.push(key);
+
+  const isGlobal = _currentShortcuts[id] && _currentShortcuts[id].global;
+
+  _currentShortcuts[id] = {
+    ..._currentShortcuts[id],
+    keys: parts.join('+'),
+    ctrl: ctrl,
+    key: key,
+    shift: shift,
+    alt: alt,
+    global: isGlobal,
+  };
+  saveShortcuts(_currentShortcuts);
+
+  // 如果是全局快捷键，通知 Electron 主进程重新注册
+  if (isGlobal && window.electronAPI && window.electronAPI.isElectron) {
+    window.electronAPI.sendMessage('register-global-shortcut', _currentShortcuts[id].keys);
+  }
+
+  _capturingShortcutId = null;
+  renderShortcutList();
+  toast('快捷键已更新：' + _currentShortcuts[id].keys, 'success');
+}, true);
+
+// ── 重置快捷键 ──
+function resetShortcuts() {
+  if (!confirm('确定恢复到默认快捷键设置？')) return;
+  _currentShortcuts = JSON.parse(JSON.stringify(DEFAULT_SHORTCUTS));
+  saveShortcuts(_currentShortcuts);
+  renderShortcutList();
+  // 通知 Electron 重置全局快捷键
+  if (window.electronAPI && window.electronAPI.isElectron) {
+    const sw = _currentShortcuts['show-window'];
+    if (sw && sw.global) {
+      window.electronAPI.sendMessage('register-global-shortcut', sw.keys);
+    }
+  }
+  toast('快捷键已恢复默认', 'success');
+}
+async function sendDesktopNotify(title, body) {
+  // 优先使用 Electron 原生通知
+  if (window.electronAPI && window.electronAPI.isElectron && window.electronAPI.showNotification) {
+    try {
+      await window.electronAPI.showNotification(title, body);
+      return;
+    } catch (e) { /* 降级到浏览器通知 */ }
+  }
+  // 浏览器通知降级
+  if (!('Notification' in window)) return;
+  if (Notification.permission === 'default') {
+    await Notification.requestPermission();
+  }
+  if (Notification.permission === 'granted') {
+    try { new Notification(title, { body, icon: '/favicon.ico', tag: 'pam-notify' }); } catch (e) {}
+  }
+}
+
+// 请求通知权限（页面加载时调用）
+async function requestNotifyPermission() {
+  if (window.electronAPI && window.electronAPI.isElectron) return; // Electron 不需要浏览器权限
+  if (!('Notification' in window)) return;
+  if (Notification.permission === 'default') {
+    await Notification.requestPermission();
+  }
 }

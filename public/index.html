@@ -2,175 +2,8 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8"><title>项目档案管理器</title>
-<style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,"Microsoft YaHei",sans-serif;font-size:13px;background:#eef1f5;color:#1e293b;height:100vh;display:flex;flex-direction:column;overflow:hidden}
-
-/* 头部 */
-#header{height:52px;background:#fff;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between;padding:0 20px;flex-shrink:0;box-shadow:0 1px 4px rgba(0,0,0,.04)}
-#header .logo{font-size:17px;font-weight:700;color:#1e293b;letter-spacing:-.3px}
-#header .header-actions{display:flex;align-items:center;gap:6px}
-#header input{width:170px;height:32px;border:1px solid #e2e8f0;border-radius:6px;padding:0 12px;font-size:13px;outline:none;transition:border .2s}
-#header input:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.1)}
-#themeToggle{width:32px;height:32px;border:none;border-radius:6px;background:#f1f5f9;cursor:pointer;font-size:16px;transition:all .15s;display:flex;align-items:center;justify-content:center}
-#themeToggle:hover{background:#e2e8f0}
-
-/* 主体 */
-#main{display:flex;flex:1;overflow:hidden}
-
-/* 侧边栏 */
-#sidebar{width:340px;background:#1a1f2b;color:#cbd5e1;display:flex;flex-direction:column;flex-shrink:0;min-width:200px}
-#splitter{width:4px;background:transparent;cursor:col-resize;flex-shrink:0;transition:background .2s;position:relative}
-#splitter:hover,#splitter.active{background:#3b82f6}
-#splitter::after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,transparent 40%,#94a3b8 40%,#94a3b8 45%,transparent 45%,transparent 55%,#94a3b8 55%,#94a3b8 60%,transparent 60%);opacity:0;transition:opacity .2s}
-#splitter:hover::after{opacity:1}
-
-.sidebar-hdr{padding:14px 16px;font-weight:600;font-size:13px;border-bottom:1px solid rgba(255,255,255,.05);display:flex;justify-content:space-between;align-items:center;letter-spacing:.2px}
-.sidebar-hdr .badge{background:#3b82f6;color:#fff;font-size:11px;padding:2px 10px;border-radius:10px;font-weight:500}
-#sidebar input{margin:8px 10px;padding:7px 12px;border:1px solid rgba(255,255,255,.08);border-radius:8px;background:rgba(255,255,255,.04);color:#e2e8f0;font-size:12px;outline:none;transition:all .2s}
-#sidebar input:focus{border-color:rgba(59,130,246,.5);background:rgba(255,255,255,.06);box-shadow:0 0 0 2px rgba(59,130,246,.15)}
-#sidebar input::placeholder{color:#64748b}
-
-#projectList{flex:1;overflow-y:auto;overflow-x:hidden}
-#projectList .cat-label{padding:7px 16px;font-size:11px;font-weight:600;color:#94a3b8;cursor:pointer;user-select:none;letter-spacing:.3px;transition:color .15s}
-#projectList .cat-label:hover{color:#cbd5e1}
-#projectList .cat-label .arr{display:inline-block;transition:transform .2s;font-size:9px;width:10px}
-#projectList .cat-label.folded .arr{transform:rotate(-90deg)}
-#projectList .item{padding:9px 14px 9px 22px;cursor:pointer;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-left:3px solid transparent;display:flex;align-items:center;gap:8px;transition:all .15s}
-#projectList .item:hover{background:#252c3b;padding-left:24px}
-#projectList .item.sel{background:#2d3852;border-left-color:#3b82f6;color:#fff}
-#projectList .item.done{opacity:.5}
-#projectList .item.done.sel{opacity:.82}
-#projectList .item .dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex-shrink:0;transition:transform .2s}
-#projectList .item.sel .dot{transform:scale(1.3)}
-#projectList .item.editing .dot{background:#3b82f6;box-shadow:0 0 6px rgba(59,130,246,.4)}
-#projectList .item.modifying .dot{background:#f59e0b;box-shadow:0 0 6px rgba(245,158,11,.4)}
-#projectList .item.done .dot{background:#22c55e;box-shadow:0 0 6px rgba(34,197,94,.4)}
-
-/* 状态快速切换 */
-.item-status{position:relative;display:inline-flex;align-items:center;margin-right:4px;flex-shrink:0}
-.item-status .status-btn{width:22px;height:22px;border:none;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:10px;transition:all .15s;background:transparent;padding:0;opacity:.55}
-.item-status .status-btn:hover{opacity:1;transform:scale(1.2)}
-
-/* 状态浮动下拉（渲染在 body 层，用 position:fixed 避免被 sidebar overflow 裁切） */
-#statusDrop{display:none;position:fixed;z-index:9999;background:#fff;border-radius:8px;box-shadow:0 8px 30px rgba(0,0,0,.18),0 2px 6px rgba(0,0,0,.08);min-width:130px;overflow:hidden;animation:dropIn .12s ease}
-@keyframes dropIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
-#statusDrop.show{display:block}
-#statusDrop .so{padding:8px 14px;font-size:12px;cursor:pointer;white-space:nowrap;border:none;width:100%;text-align:left;background:#fff;color:#334155;transition:background .1s;display:flex;align-items:center;gap:6px}
-#statusDrop .so:hover{background:#f1f5f9}
-#statusDrop .so.sel{background:#eff6ff;color:#2563eb;font-weight:600}
-body.dark #statusDrop{background:#1e293b;box-shadow:0 8px 30px rgba(0,0,0,.5)}
-body.dark #statusDrop .so{background:#1e293b;color:#cbd5e1}
-body.dark #statusDrop .so:hover{background:#334155}
-body.dark #statusDrop .so.sel{background:#1e3a5f;color:#60a5fa}
-
-.sidebar-btns{display:flex;flex-direction:column;gap:5px;padding:12px 12px;border-top:1px solid rgba(255,255,255,.05)}
-.sidebar-btns .sbtn{display:block;width:100%;padding:11px 0;border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:500;cursor:pointer;text-align:center;transition:all .2s;letter-spacing:.2px}
-.sidebar-btns .sbtn:hover{filter:brightness(1.15);transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,.2)}
-.sbtn-new{background:linear-gradient(135deg,#3b82f6,#2563eb)}.sbtn-edit{background:#475569}.sbtn-del{background:transparent;color:#ef4444!important;border:1px solid rgba(239,68,68,.2)}.sbtn-del:hover{background:rgba(239,68,68,.1)!important}.sbtn-import{background:linear-gradient(135deg,#8b5cf6,#7c3aed)}
-
-/* 右侧面板 */
-#rightPanel{flex:1;overflow-y:auto;padding:20px 24px;display:flex;flex-direction:column;gap:14px}
-#rightPanel .empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#94a3b8;font-size:15px;gap:8px}
-#rightPanel .empty::before{content:'📋';font-size:40px;opacity:.3}
-
-/* 卡片 */
-.card{background:#fff;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,.04),0 1px 2px rgba(0,0,0,.06);border:1px solid #f1f5f9;transition:box-shadow .2s}
-.card:hover{box-shadow:0 2px 8px rgba(0,0,0,.06),0 1px 3px rgba(0,0,0,.08)}
-.card-hdr{padding:12px 16px;font-weight:600;font-size:13px;border-bottom:1px solid #f1f5f9;color:#334155;display:flex;align-items:center;letter-spacing:.1px}
-.card-body{padding:12px 16px}
-
-.info-row{display:flex;align-items:center;padding:4px 0;gap:10px;font-size:13px}
-.info-row .lbl{width:45px;color:#94a3b8;font-size:11px;flex-shrink:0;text-transform:uppercase;letter-spacing:.5px}
-.info-row .val{font-family:Consolas,monospace;font-size:12px;word-break:break-all;color:#334155}
-.act-bar{display:flex;flex-wrap:wrap;gap:6px}
-
-/* 待交付列表 */
-.pending-list{max-height:220px;overflow-y:auto;border:1px solid #e2e8f0;border-radius:8px;margin:6px 0}
-.pending-list .pi{display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid #f8fafc;font-size:12px;transition:background .1s}
-.pending-list .pi:last-child{border-bottom:none}
-.pending-list .pi:hover{background:#f8fafc}
-.pending-list input[type=checkbox]{accent-color:#3b82f6;width:15px;height:15px}
-.pending-list .empty{padding:24px;text-align:center;color:#94a3b8;font-size:12px}
-
-/* 按钮 */
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:4px;padding:7px 16px;border-radius:7px;font-size:12px;font-weight:500;cursor:pointer;border:none;transition:all .15s;white-space:nowrap;letter-spacing:.1px}
-.btn:hover{transform:translateY(-1px);box-shadow:0 2px 6px rgba(0,0,0,.12)}
-.btn:active{transform:translateY(0)}
-.btn-sm{padding:4px 10px;font-size:11px;border-radius:6px}
-.btn-primary{background:#3b82f6;color:#fff}.btn-primary:hover{background:#2563eb}
-.btn-accent{background:#7c3aed;color:#fff}.btn-accent:hover{background:#6d28d9}
-.btn-warn{background:#f59e0b;color:#fff}.btn-warn:hover{background:#d97706}
-.btn-outline{background:#fff;color:#475569;border:1px solid #e2e8f0}.btn-outline:hover{background:#f8fafc}
-.btn-danger{background:#ef4444;color:#fff}.btn-danger:hover{background:#dc2626}
-
-/* 进度面板 */
-#progressPanel{display:none;background:#fff;border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,.15);padding:14px 18px;position:fixed;bottom:24px;right:24px;z-index:1000;min-width:340px;max-width:440px;border:1px solid #e2e8f0}
-#progressPanel.show{display:block;animation:slideUp .2s ease}
-.prog-hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
-.prog-hdr .title{font-weight:600;font-size:13px;color:#1e293b}
-.prog-hdr .close-btn{background:none;border:none;font-size:18px;cursor:pointer;color:#94a3b8;padding:0 2px;line-height:1}
-.prog-hdr .close-btn:hover{color:#ef4444}
-.prog-bar{height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden;margin-bottom:4px}
-.prog-bar .fill{height:100%;background:linear-gradient(90deg,#3b82f6,#2563eb);border-radius:3px;transition:width .2s ease;width:0%}
-.prog-actions{display:flex;gap:6px;margin-top:6px}
-.prog-actions .btn{padding:4px 12px;font-size:11px}
-body.dark #progressPanel{background:#1e293b;border-color:#334155}
-body.dark #progressPanel .prog-hdr .title{color:#e2e8f0}
-body.dark #progressPanel .prog-bar{background:#334155}
-
-/* 后台任务面板 */
-#dashboardPanel{display:none;background:#fff;border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,.15);padding:14px 18px;position:fixed;bottom:24px;left:24px;z-index:1000;min-width:280px;max-width:380px;max-height:380px;border:1px solid #e2e8f0}
-#dashboardPanel.show{display:block;animation:slideUp .2s ease}
-body.dark #dashboardPanel{background:#1e293b;border-color:#334155}
-body.dark #dashboardPanel .prog-hdr .title{color:#e2e8f0}
-
-/* 状态栏 */
-#statusBar{height:28px;padding:0 16px;display:flex;align-items:center;background:#fff;border-top:1px solid #e2e8f0;font-size:11px;color:#94a3b8;flex-shrink:0;letter-spacing:.2px}
-
-/* 弹窗 */
-.modal-overlay{position:fixed;inset:0;background:rgba(15,23,42,.4);backdrop-filter:blur(4px);z-index:100;display:none;justify-content:center;align-items:center;animation:fadeIn .15s ease}
-@keyframes fadeIn{from{opacity:0}to{opacity:1}}
-.modal-box{background:#fff;border-radius:10px;width:520px;max-height:85vh;overflow-y:auto;box-shadow:0 20px 50px rgba(0,0,0,.15);animation:slideUp .2s ease}
-@keyframes slideUp{from{opacity:0;transform:translateY(15px)}to{opacity:1;transform:translateY(0)}}
-.modal-hdr{padding:14px 18px;font-weight:600;font-size:14px;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center}
-.modal-body{padding:18px}
-.modal-btns{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
-.fg{margin-bottom:12px}.fg label{display:block;font-size:12px;color:#64748b;margin-bottom:4px;font-weight:500}
-.fg input,.fg select{width:100%;height:34px;border:1px solid #e2e8f0;border-radius:7px;padding:0 12px;font-size:13px;outline:none;transition:all .15s}
-.fg input:focus,.fg select:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.1)}
-.ir{display:flex;gap:6px}.ir input{flex:1}
-
-::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:3px}::-webkit-scrollbar-thumb:hover{background:#94a3b8}
-
-/* Toast */
-#toastContainer{position:fixed;top:16px;right:16px;z-index:9999;display:flex;flex-direction:column;gap:8px;pointer-events:none}
-.toast{background:#1e293b;color:#fff;padding:10px 16px;border-radius:8px;font-size:13px;box-shadow:0 8px 24px rgba(0,0,0,.2);animation:toastIn .25s ease;pointer-events:auto;max-width:360px;display:flex;align-items:center;gap:8px}
-.toast.warn{background:#f59e0b;color:#fff}.toast.error{background:#ef4444;color:#fff}.toast.success{background:#22c55e;color:#fff}
-@keyframes toastIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}
-
-/* 暗色主题 */
-body.dark{background:#0f172a;color:#e2e8f0}
-body.dark #header{background:#1e293b;border-color:#334155}
-body.dark #header .logo{color:#e2e8f0}
-body.dark #header input{background:#334155;border-color:#475569;color:#e2e8f0}
-body.dark #themeToggle{background:#334155}
-body.dark #themeToggle:hover{background:#475569}
-body.dark .card{background:#1e293b;border-color:#334155;box-shadow:0 1px 3px rgba(0,0,0,.2)}
-body.dark .card-hdr{color:#e2e8f0;border-color:#334155}
-body.dark .info-row .val{color:#cbd5e1}
-body.dark .info-row .lbl{color:#94a3b8}
-body.dark .pending-list{border-color:#334155}
-body.dark .pending-list .pi{border-color:#334155}
-body.dark .pending-list .pi:hover{background:#1a2332}
-body.dark .btn-outline{background:#334155;color:#cbd5e1;border-color:#475569}
-body.dark .btn-outline:hover{background:#475569}
-body.dark #statusBar{background:#1e293b;border-color:#334155;color:#94a3b8}
-body.dark .modal-box{background:#1e293b;color:#e2e8f0}
-body.dark .modal-hdr{border-color:#334155}
-body.dark .fg label{color:#94a3b8}
-body.dark .fg input,body.dark .fg select{background:#334155;border-color:#475569;color:#e2e8f0}
-</style>
+<link rel="stylesheet" href="/css/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='bg' x1='0' y1='0' x2='0' y2='1'><stop offset='0%' stop-color='%233B82F6'/><stop offset='100%' stop-color='%232563EB'/></linearGradient></defs><rect width='100' height='100' rx='22' fill='url(%23bg)'/><path d='M22 0h32a8 8 0 018 8v-2c0 4.4-3.6 8-8 8H22a8 8 0 01-8-8v6c0 4.4 3.6 8 8 8z' fill='%231D4ED8' transform='translate(0,9)'/><rect x='10' y='28' width='80' height='62' rx='12' fill='white'/><polyline points='35,55 45,65 65,40' fill='none' stroke='%2322C55E' stroke-width='8' stroke-linecap='round' stroke-linejoin='round'/></svg>">
 </head>
 <body>
 
@@ -183,6 +16,7 @@ body.dark .fg input,body.dark .fg select{background:#334155;border-color:#475569
     <input id="keywordInput" placeholder="识别关键字">
     <button class="btn btn-sm btn-primary" onclick="applyKeyword()">应用并扫描</button>
     <button id="themeToggle" onclick="toggleTheme()" title="切换主题">🌙</button>
+    <button id="settingsBtn" onclick="showSettings()" title="设置" style="width:32px;height:32px;border:none;border-radius:6px;background:#f1f5f9;cursor:pointer;font-size:16px;transition:all .15s;display:flex;align-items:center;justify-content:center">⚙️</button>
   </div>
 </div>
 
@@ -248,7 +82,7 @@ body.dark .fg input,body.dark .fg select{background:#334155;border-color:#475569
 </div>
 <div id="statusBar"><span id="statusText">就绪</span></div>
 
-<div class="modal-overlay" id="modalOverlay"><div class="modal-box">
+<div class="modal-overlay" id="modalOverlay" style="display:none"><div class="modal-box">
   <div class="modal-hdr"><span id="modalTitle"></span><button class="btn btn-sm btn-outline" onclick="closeModal()">✕</button></div>
   <div class="modal-body" id="modalBody"></div>
 </div></div>

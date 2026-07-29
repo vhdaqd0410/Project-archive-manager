@@ -1,7 +1,8 @@
 const express = require('express');
 const path = require('path');
+const config = require('./src/config');
 const app = express();
-const PORT = process.env.PORT || 37890;
+const PORT = config.server.port;
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
