@@ -16,12 +16,61 @@ mountJobRoutes(router);
 // ── 批量导入 ──
 router.use('/import', require('./import-export'));
 
+// ── SSE 实时推送 (Feature 4) ──
+router.use('/', require('./sse'));
+
+// ── 项目统计仪表盘 (Feature 3) ──
+router.use('/stats', require('./stats'));
+
+// ── 归档报告导出 (Feature 2) ──
+router.use('/reports', require('./reports'));
+
+// ── 定时自动化 (Feature 7) ──
+router.use('/scheduler', require('./scheduler'));
+
+// ── 多通知渠道 (Feature 8) ──
+router.use('/notify', require('./notify'));
+
+// ── 插件/钩子系统 (Feature 10) ──
+router.use('/hooks', require('./hooks'));
+
+// ── 多存储后端 (Feature 11) ──
+router.use('/storage', require('./storage'));
+
+// ── 用户认证 (Feature 9) ──
+router.use('/auth', require('./auth'));
+
+// ── 工作流引擎 (Feature 12) ──
+router.use('/workflow', require('./workflow'));
+
+// ── 项目标签 ──
+router.use('/tags', require('./tags'));
+
+// ── 项目模板 ──
+router.use('/templates', require('./templates'));
+
+// ── 审计日志 ──
+router.use('/audit-logs', require('./audit-logs'));
+
+// ── 文件预览 ──
+router.use('/preview', require('./preview'));
+
+// ── 复制回滚 ──
+router.use('/rollback', require('./rollback'));
+
+// ── WebDAV ──
+router.use('/webdav', require('./webdav'));
+
 // ── 设置 ──
 router.get('/settings', (req, res) => res.json(shared.settings));
-router.put('/settings', (req, res) => {
+router.put('/settings', async (req, res) => {
   if (req.body.keyword !== undefined) shared.settings.keyword = req.body.keyword;
-  projectService.saveSettings(shared.settings);
-  res.json({ success: true, settings: shared.settings });
+  try {
+    await projectService.saveSettings(shared.settings);
+    res.json({ success: true, settings: shared.settings });
+  } catch (e) {
+    res.status(500).json({ error: '保存设置失败: ' + e.message });
+  }
 });
 
 // ── 交付历史 ──
@@ -37,7 +86,7 @@ router.get('/export/backup', (req, res) => {
   res.json(backup);
 });
 
-router.post('/import/backup', (req, res) => {
+router.post('/import/backup', async (req, res) => {
   const { projects: importedProjects, settings: importedSettings } = req.body;
   if (!Array.isArray(importedProjects)) return res.status(400).json({ error: '无效的备份数据' });
   const added = [];
@@ -53,9 +102,13 @@ router.post('/import/backup', (req, res) => {
       if (!shared.settings.templates.some(ex => ex.name === t.name)) shared.settings.templates.push(t);
     }
   }
-  projectService.saveProjects(shared.projects);
-  projectService.saveSettings(shared.settings);
-  res.json({ success: true, added: added.length, total: shared.projects.length });
+  try {
+    await projectService.saveProjects(shared.projects);
+    await projectService.saveSettings(shared.settings);
+    res.json({ success: true, added: added.length, total: shared.projects.length });
+  } catch (e) {
+    res.status(500).json({ error: '导入保存失败: ' + e.message });
+  }
 });
 
 // ── 文件夹浏览 ──
@@ -99,10 +152,13 @@ router.post('/pick-folder', (req, res) => {
 router.post('/open-explorer', (req, res) => {
   const { path: p } = req.body;
   if (!p) return res.status(400).json({ error: '路径为空' });
-  if (!fs.existsSync(p)) return res.status(400).json({ error: '路径不存在: ' + p });
+  // 路径规范化，防止目录遍历攻击
+  const path = require('path');
+  const normalized = path.resolve(p.replace(/\//g, '\\'));
+  if (!fs.existsSync(normalized)) return res.status(400).json({ error: '路径不存在: ' + normalized });
   // 用 cmd /c start 避免包含中文/特殊字符的路径被 explorer 误解
-  execFile('cmd.exe', ['/c', 'start', '', 'explorer.exe', p.replace(/\//g, '\\')], (err) => {
-    if (err) console.error('explorer 失败:', p, err.message);
+  execFile('cmd.exe', ['/c', 'start', '', 'explorer.exe', normalized], (err) => {
+    if (err) console.error('explorer 失败:', normalized, err.message);
   });
   res.json({ success: true });
 });

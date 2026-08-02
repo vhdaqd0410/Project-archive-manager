@@ -258,7 +258,7 @@ function buildMenu() {
     {
       label: '帮助',
       submenu: [
-        { label: '关于项目档案管理器', click: () => dialog.showMessageBox(mainWindow, { type: 'info', title: '关于', message: '项目档案管理器 v2.4.0', detail: '项目档案交付 NAS 管理工具\nElectron 桌面版\n\n拖放文件夹到窗口即可导入\nCtrl+Shift+D 全局热键呼出' }) },
+        { label: '关于项目档案管理器', click: () => dialog.showMessageBox(mainWindow, { type: 'info', title: '关于', message: '项目档案管理器 v2.6.0', detail: '项目档案交付 NAS 管理工具\nElectron 桌面版\n\n拖放文件夹到窗口即可导入\nCtrl+Shift+D 全局热键呼出' }) },
         { label: '打开数据目录', click: () => shell.openPath(path.join(__dirname, '..', 'data')) }
       ]
     }

@@ -16,11 +16,7 @@ projects.forEach(p => {
 });
 
 function findIndexById(id) {
-  const byId = projects.findIndex(p => p.id === id);
-  if (byId >= 0) return byId;
-  const num = parseInt(id);
-  if (!isNaN(num) && num >= 0 && num < projects.length) return num;
-  return -1;
+  return projects.findIndex(p => p.id === id);
 }
 
 function getProjectById(id) {

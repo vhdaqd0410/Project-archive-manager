@@ -13,6 +13,14 @@ window.onload = async function() {
   projects = await api.get('/api/projects');
   settings = await api.get('/api/settings');
   document.getElementById('keywordInput').value = settings.keyword || '项目归档资料';
+  // 加载标签
+  if (window.Features) {
+    await window.Features.loadTags();
+    // 为每个项目加载标签
+    for (const p of projects) {
+      try { p._tagObjs = await window.Features.getProjectTags(p.id); } catch(e) { p._tagObjs = []; }
+    }
+  }
   renderProjectList();
   refreshServerStatus();
 };
@@ -125,7 +133,8 @@ function toggleStatusMenu(e, pid, idx) {
 async function setProjectStatus(idx, status) {
   let drop = document.getElementById('statusDrop');
   drop.classList.remove('show');
-  await api.put('/api/projects/' + idx + '/status', { status });
+  const pid = projects[idx].id;
+  await api.put('/api/projects/' + pid + '/status', { status });
   projects[idx].status = status;
   renderProjectList();
   if (sel === idx) selectProject(idx);
@@ -192,6 +201,12 @@ function renderProjectList() {
   const list = $('projectList'), search = ($('searchInput').value || '').toLowerCase();
   list.innerHTML = '';
 
+  // 标签筛选栏
+  const existingFilter = document.getElementById('tagFilterBar');
+  if (existingFilter && window.Features) {
+    window.Features.renderTagFilter(existingFilter);
+  }
+
   // 排序：按创建时间或名称
   const sorted = projects.map(function(p, i) { return { p: p, i: i }; });
   if (_sortBy === 'time') {
@@ -201,8 +216,10 @@ function renderProjectList() {
   }
 
   const groups = { editing: [], modifying: [], done: [] };
+  const tagFilter = window.Features ? window.Features.getTagFilter() : null;
   for (const item of sorted) {
     if (search && item.p.name.toLowerCase().indexOf(search) < 0) continue;
+    if (tagFilter && (!item.p._tagObjs || !item.p._tagObjs.some(t => t.id === tagFilter))) continue;
     const g = item.p.status === 'done' ? 'done' : item.p.status === 'modifying' ? 'modifying' : 'editing';
     groups[g].push(item.i);
   }
@@ -274,7 +291,7 @@ function selectProject(idx) {
   rp.innerHTML =
     '<div class="card"><div class="card-hdr">📂 项目目录</div><div class="card-body"><div class="info-row"><span class="lbl">本地</span><span class="val" id="infoLocalDir">' + esc(p.localDir || '-') + '</span></div><div class="info-row"><span class="lbl">NAS</span><span class="val" id="infoNasDir">' + esc(p.nasDir || '-') + '<span id="nasStatus" style="margin-left:8px;font-size:11px"></span></span></div>' + (p.memo ? '<div class="info-row"><span class="lbl">备注</span><span class="val" style="color:#f59e0b">' + esc(p.memo) + '</span></div>' : '') + '</div></div>' +
     '<div class="card"><div class="card-hdr">🔍 关键词目录检测</div><div class="card-body"><div id="detectLocal" style="font-size:12px;color:#94a3b8">扫描中...</div><div id="detectNas" style="font-size:12px;color:#94a3b8">扫描中...</div><div id="detectSummary" style="font-size:12px;margin-top:4px"></div></div></div>' +
-    '<div class="act-bar"><button class="btn btn-primary" id="btnOpenLocal">打开本地</button><button class="btn btn-primary" id="btnOpenNas">打开NAS</button><button class="btn btn-outline" id="btnCopyPath">复制NAS路径</button><button class="btn btn-outline" id="btnCopyMsg">复制交付信息</button></div>' +
+    '<div class="act-bar"><button class="btn btn-primary" id="btnOpenLocal">打开本地</button><button class="btn btn-primary" id="btnOpenNas">打开NAS</button><button class="btn btn-outline" id="btnCopyPath">复制NAS路径</button><button class="btn btn-outline" id="btnCopyMsg">复制交付信息</button><button class="btn btn-outline" id="btnTags">🏷️ 标签</button><button class="btn btn-outline" id="btnPreview">🎬 预览</button><button class="btn btn-outline" id="btnRollback">↩️ 回滚</button><button class="btn btn-outline" id="btnTemplate">📋 存模板</button></div>' +
     '<div class="card"><div class="card-hdr">⚠ 待交付文件 <span id="pendingCount" style="margin-left:8px">0</span></div><div class="card-body"><div class="pending-list" id="pendingList"></div><div class="act-bar"><button class="btn btn-sm btn-outline" id="btnRefresh">刷新</button><button class="btn btn-sm btn-outline" id="btnCheckAll">全选</button><button class="btn btn-sm btn-outline" id="btnUncheckAll">取消全选</button><button class="btn btn-sm btn-warn" id="btnCopy">复制选中到NAS</button></div></div></div>' +
     '<div class="card"><div class="card-hdr">🎬 上映单集版 · 修改交付 <span id="modifyCount" style="margin-left:8px">0</span></div><div class="card-body"><div id="modifyInfo" style="font-size:11px;color:#94a3b8">检测中...</div><div id="modifySummary" style="font-size:12px;margin:4px 0"></div><div class="pending-list" id="modifyList"></div><div class="act-bar"><button class="btn btn-sm btn-primary" id="btnModOpenLocal">打开本地</button><button class="btn btn-sm btn-primary" id="btnModOpenNas">打开NAS</button><button class="btn btn-sm btn-outline" id="btnModRefresh">刷新</button><button class="btn btn-sm btn-outline" id="btnModCheckAll">全选</button><button class="btn btn-sm btn-outline" id="btnModUncheckAll">取消全选</button><button class="btn btn-sm btn-outline" id="btnModCopyPath">复制路径</button><button class="btn btn-sm btn-warn" id="btnModCopy">复制选中到NAS</button></div></div></div>' +
     '<div class="card"><div class="card-hdr">📦 000交付 <span id="count000" style="margin-left:8px">0</span></div><div class="card-body"><div id="info000" style="font-size:11px;color:#94a3b8">检测中...</div><div id="summary000" style="font-size:12px;margin:4px 0"></div><div class="pending-list" id="list000"></div><div class="act-bar"><button class="btn btn-sm btn-primary" id="btn000OpenLocal">打开本地</button><button class="btn btn-sm btn-primary" id="btn000OpenNas">打开NAS</button><button class="btn btn-sm btn-outline" id="btn000Refresh">刷新</button><button class="btn btn-sm btn-outline" id="btn000CheckAll">全选</button><button class="btn btn-sm btn-outline" id="btn000UncheckAll">取消全选</button><button class="btn btn-sm btn-outline" id="btn000CopyPath">复制路径</button><button class="btn btn-sm btn-warn" id="btn000Copy">复制选中到NAS</button></div></div></div>' +
@@ -317,6 +334,11 @@ function bindEvents() {
   b = $('btn000CopyPath'); if (b) b.onclick = () => copyText(nasDir000);
   b = $('btn000OpenLocal'); if (b) b.onclick = () => openFolder(localDir000);
   b = $('btn000OpenNas'); if (b) b.onclick = () => openFolder(nasDir000);
+  // 新功能按钮
+  b = $('btnTags'); if (b) b.onclick = () => { if (window.Features && sel >= 0) window.Features.showTagManager(projects[sel].id); };
+  b = $('btnPreview'); if (b) b.onclick = () => { if (window.Features && sel >= 0) window.Features.showFilePreview(projects[sel].id, $('keywordInput').value); };
+  b = $('btnRollback'); if (b) b.onclick = () => { if (window.Features && sel >= 0) window.Features.showRollbackHistory(projects[sel].id); };
+  b = $('btnTemplate'); if (b) b.onclick = () => { if (window.Features && sel >= 0) window.Features.saveAsTemplate(projects[sel]); };
 }
 
 // ==================== 检测 ====================
@@ -325,7 +347,7 @@ async function checkNasStatus() {
   if (sel < 0 || !projects[sel].nasDir) { el.innerHTML = ''; return; }
   el.innerHTML = ' 检测中...';
   try {
-    const r = await api.get('/api/projects/' + sel + '/check-nas');
+    const r = await api.get('/api/projects/' + projects[sel].id + '/check-nas');
     if (r.accessible) el.innerHTML = '<span style="color:#22c55e">✓ 可访问</span>';
     else el.innerHTML = '<span style="color:#ef4444">✗ ' + esc(r.error || '不可访问') + '</span>';
   } catch { el.innerHTML = '<span style="color:#ef4444">✗ 检测失败</span>'; }
@@ -336,7 +358,7 @@ async function refreshDetail() {
   checkNasStatus();
   try {
     const kw = $('keywordInput').value || '项目归档资料';
-    resolved = await api.get('/api/projects/' + sel + '/detect?keyword=' + encodeURIComponent(kw));
+    resolved = await api.get('/api/projects/' + projects[sel].id + '/detect?keyword=' + encodeURIComponent(kw));
     const dl = $('detectLocal'), dn = $('detectNas'), ds = $('detectSummary');
     if (!resolved.relPath) {
       dl.textContent = '未找到含"' + kw + '"的子目录'; dn.textContent = ''; ds.textContent = '';
@@ -355,12 +377,12 @@ async function refreshPending() {
   const list = $('pendingList'); if (!list) return;
   list.innerHTML = '';
   if (!resolved || !resolved.relPath || !resolved.localExists) return;
-  const data = await api.get('/api/projects/' + sel + '/pending?keyword=' + encodeURIComponent($('keywordInput').value || '项目归档资料'));
+  const data = await api.get('/api/projects/' + projects[sel].id + '/pending?keyword=' + encodeURIComponent($('keywordInput').value || '项目归档资料'));
   const files = data.files || [];
   let countLabel = files.length + ' 个';
   // 顺便取 monitor 数据展示缺集信息
   try {
-    const mon = await api.get('/api/projects/' + sel + '/monitor');
+    const mon = await api.get('/api/projects/' + projects[sel].id + '/monitor');
     if (mon.archiveMissing && mon.archiveMissing.hasMissing) {
       let ranges = mon.archiveMissing.ranges || [];
       let tip = ranges.length <= 6 ? ranges.join(', ') : ranges.slice(0, 5).join(', ') + '…';
@@ -380,7 +402,7 @@ async function copyPending() {
   if (!files.length) { alert('请先勾选'); return; }
   startProgress('复制文件', files.length);
   try {
-    const r = await api.post('/api/projects/' + sel + '/copy', {
+    const r = await api.post('/api/projects/' + projects[sel].id + '/copy', {
       fileNames: files,
       keyword: $('keywordInput').value || '项目归档资料'
     });
@@ -393,7 +415,7 @@ async function copyPending() {
 async function refreshModify() {
   if (sel < 0) return;
   try {
-    const data = await api.get('/api/projects/' + sel + '/modify-batches?keyword=' + encodeURIComponent('上映单集版'));
+    const data = await api.get('/api/projects/' + projects[sel].id + '/modify-batches?keyword=' + encodeURIComponent('上映单集版'));
     const mi = $('modifyInfo'), ms = $('modifySummary'), ml = $('modifyList'), mc = $('modifyCount');
     if (!mi) return;
     if (!data.found) { mi.textContent = '未找到"上映单集版"目录'; return; }
@@ -421,7 +443,7 @@ async function copyModifyBatches() {
   for (const n of names) checkedModify[n] = true;
   startProgress('上映单集版交付', names.length);
   try {
-    const r = await api.post('/api/projects/' + sel + '/modify-copy-batch', { batchNames: names, keyword: '上映单集版' });
+    const r = await api.post('/api/projects/' + projects[sel].id + '/modify-copy-batch', { batchNames: names, keyword: '上映单集版' });
     await pollJob(r.jobId);
     refreshModify();
   } catch (e) { addLog('✗ 批量复制失败: ' + e.message); finishProgress('error', e.message); }
@@ -431,7 +453,12 @@ async function copyModifyBatches() {
 function showProjectDlg(editIdx) {
   const p = editIdx >= 0 ? projects[editIdx] : { name: '', localDir: '', nasDir: '', memo: '', status: 'editing' };
   const s = p.status || 'editing';
-  let h = '<div class="fg"><label>项目名称</label><input id="dlgName" value="' + escAttr(p.name) + '"></div>';
+  let h = '';
+  // 新建模式时显示模板选择
+  if (editIdx < 0) {
+    h += '<div class="fg" style="display:flex;gap:6px;align-items:center"><button class="btn btn-sm btn-accent" onclick="window.Features.showTemplatePicker(\'applyTemplateToDialog\')">📋 从模板创建</button><span style="font-size:11px;color:var(--text-muted)">或手动填写下方信息</span></div>';
+  }
+  h += '<div class="fg"><label>项目名称</label><input id="dlgName" value="' + escAttr(p.name) + '"></div>';
   h += '<div class="fg"><label>本地根目录</label><div class="ir"><input id="dlgLocal" value="' + escAttr(p.localDir) + '"><button class="btn btn-sm btn-outline" onclick="pickFolder(\'dlgLocal\')">浏览</button></div></div>';
   h += '<div class="fg"><label>NAS根目录</label><div class="ir"><input id="dlgNas" value="' + escAttr(p.nasDir) + '"><button class="btn btn-sm btn-outline" onclick="pickFolder(\'dlgNas\')">浏览</button></div></div>';
   h += '<div class="fg"><label>备注</label><textarea id="dlgMemo" style="width:100%;height:60px;border:1px solid #e2e8f0;border-radius:7px;padding:8px 12px;font-size:13px;outline:none;resize:vertical" placeholder="添加备注信息...">' + esc(p.memo || '') + '</textarea></div>';
@@ -463,10 +490,19 @@ async function saveProject(editIdx) {
     status: $('dlgStatus').value
   };
   if (!data.name) { alert('请输入名称'); return; }
-  if (editIdx >= 0) await api.put('/api/projects/' + editIdx, data);
-  else await api.post('/api/projects', data);
+  let savedId;
+  if (editIdx >= 0) {
+    savedId = projects[editIdx].id;
+    await api.put('/api/projects/' + savedId, data);
+  } else {
+    const r = await api.post('/api/projects', data);
+    savedId = r.project ? r.project.id : null;
+  }
   closeModal(); projects = await api.get('/api/projects');
-  renderProjectList(); selectProject(editIdx >= 0 ? editIdx : projects.length - 1);
+  renderProjectList();
+  // 通过 ID 重新定位项目（避免数组顺序变化导致选错）
+  const newIdx = projects.findIndex(function(p) { return p.id === savedId; });
+  selectProject(newIdx >= 0 ? newIdx : projects.length - 1);
 }
 
 
@@ -571,7 +607,7 @@ function parseAssignPaste() {
 async function delProject() {
   if (sel < 0) return;
   if (!confirm('确定删除「' + projects[sel].name + '」？')) return;
-  await api.del('/api/projects/' + sel);
+  await api.del('/api/projects/' + projects[sel].id);
   projects = await api.get('/api/projects');
   if (sel >= projects.length) sel = projects.length - 1;
   renderProjectList(); selectProject(sel);
@@ -585,7 +621,7 @@ async function setEpisodeTarget(idx) {
   if (val === null) return;
   let num = parseInt(val);
   if (isNaN(num) || num < 0) { alert('请输入有效数字'); return; }
-  await api.put('/api/projects/' + idx, { episodeTarget: num, name: projects[idx].name });
+  await api.put('/api/projects/' + projects[idx].id, { episodeTarget: num, name: projects[idx].name });
   projects = await api.get('/api/projects');
   renderProjectList();
   selectProject(idx);
@@ -653,7 +689,7 @@ async function doImport() {
 async function refresh000() {
   if (sel < 0) return;
   try {
-    const data = await api.get('/api/projects/' + sel + '/modify-batches?keyword=' + encodeURIComponent('000交付'));
+    const data = await api.get('/api/projects/' + projects[sel].id + '/modify-batches?keyword=' + encodeURIComponent('000交付'));
     const mi = $('info000'), ms = $('summary000'), ml = $('list000'), mc = $('count000');
     if (!mi) return;
     if (!data.found) { mi.textContent = '未找到"000交付"目录'; return; }
@@ -681,12 +717,12 @@ async function copy000Delivery() {
   for (const n of names) checked000[n] = true;
   startProgress('000交付', names.length);
   try {
-    const r = await api.post('/api/projects/' + sel + '/modify-copy-batch', { batchNames: names, keyword: '000交付' });
+    const r = await api.post('/api/projects/' + projects[sel].id + '/modify-copy-batch', { batchNames: names, keyword: '000交付' });
     await pollJob(r.jobId);
     // 复制成功后改状态
     const job = await api.get('/api/jobs/' + r.jobId);
     if (job.completed > 0) {
-      await api.put('/api/projects/' + sel + '/status', { status: 'done' });
+      await api.put('/api/projects/' + projects[sel].id + '/status', { status: 'done' });
       projects = await api.get('/api/projects');
       renderProjectList();
       addLog('📌 项目状态已更新为「已完成」');
@@ -696,16 +732,20 @@ async function copy000Delivery() {
   } catch (e) { addLog('✗ 000交付失败: ' + e.message); finishProgress('error', e.message); }
 }
 
-// ==================== 进度条系统（实时文件级 + ETA + 多任务监控）====================
+// ==================== 进度条系统（重新设计：文件级列表 + 实时速度 + ETA + SSE驱动）====================
 let _currentJobId = null;
 let _pollTimer = null;
 let _fsProgressBytes = 0;
+let _jobStartTime = Date.now();
+let _progFileListVisible = false;
+let _progFileLog = []; // 记录每个文件的处理状态
 
 function formatBytes(b) { return b >= 1073741824 ? (b/1073741824).toFixed(1)+'GB' : b>=1048576 ? (b/1048576).toFixed(1)+'MB' : b>=1024 ? (b/1024).toFixed(1)+'KB' : b+'B'; }
-function formatETA(sec) { if (sec<=0) return ''; let m=Math.floor(sec/60),s=Math.floor(sec%60); return '预计剩余 '+(m>0?m+'分':'')+s+'秒'; }
+function formatETA(sec) { if (sec<=0) return ''; let m=Math.floor(sec/60),s=Math.floor(sec%60); return (m>0?m+'分':'')+s+'秒'; }
 
 function startProgress(title, total) {
   _currentJobId = null;
+  _progFileLog = [];
   if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
   _jobStartTime = Date.now();
   let panel = document.getElementById('progressPanel');
@@ -715,7 +755,29 @@ function startProgress(title, total) {
   document.getElementById('progFile').textContent = '待启动';
   document.getElementById('progSpeed').textContent = '';
   document.getElementById('progETA').textContent = '';
+  document.getElementById('progStats').textContent = '';
+  document.getElementById('progFileList').innerHTML = '';
+  document.getElementById('progBarWrap').className = 'prog-bar';
   panel.classList.add('show');
+}
+
+function toggleProgFileList() {
+  _progFileListVisible = !_progFileListVisible;
+  document.getElementById('progFileList').style.display = _progFileListVisible ? 'block' : 'none';
+}
+
+function renderProgFileList() {
+  const list = document.getElementById('progFileList');
+  if (!list) return;
+  // 只显示最近的 50 条
+  const items = _progFileLog.slice(-50);
+  list.innerHTML = items.map(f => {
+    const icon = f.status === 'ok' ? '✓' : f.status === 'skip' ? '⏭' : f.status === 'fail' ? '✗' : '→';
+    const cls = f.status === 'current' ? 'current' : f.status;
+    return `<div class="fi ${cls}"><span class="fi-icon">${icon}</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(f.name)}</span></div>`;
+  }).join('');
+  // 滚到底部
+  list.scrollTop = list.scrollHeight;
 }
 
 function updateProgressUI(job) {
@@ -724,7 +786,16 @@ function updateProgressUI(job) {
   document.getElementById('progPct').textContent = pct + '%';
 
   let item = job.currentItem || {};
-  document.getElementById('progFile').textContent = '「' + (item.name || '...') + '」' + (job.current || 0) + '/' + job.totalItems;
+  document.getElementById('progFile').textContent = (item.name || '...') + ' ' + (job.current || 0) + '/' + job.totalItems;
+
+  // 记录文件状态
+  if (item.name && item.status) {
+    const lastEntry = _progFileLog[_progFileLog.length - 1];
+    if (!lastEntry || lastEntry.name !== item.name || lastEntry.status !== item.status) {
+      _progFileLog.push({ name: item.name, status: item.status });
+      if (_progFileListVisible) renderProgFileList();
+    }
+  }
 
   // 速度 + ETA
   let elapsed = job.elapsed || (Date.now() - _jobStartTime);
@@ -742,25 +813,31 @@ function updateProgressUI(job) {
   document.getElementById('progETA').textContent = etaText;
 
   // 状态栏
-  let stats = job.completed + ' ✓ ';
-  if (job.skipped > 0) stats += '| ' + job.skipped + ' 跳过 ';
-  if (job.failed > 0) stats += '| ' + job.failed + ' ✗ ';
+  let stats = job.completed + ' ✓';
+  if (job.skipped > 0) stats += ' · ' + job.skipped + ' ⏭';
+  if (job.failed > 0) stats += ' · ' + job.failed + ' ✗';
   document.getElementById('progStats').textContent = stats;
 
+  // 进度条状态样式
+  let barWrap = document.getElementById('progBarWrap');
   if (job.status === 'done') {
-    document.getElementById('progTitle').textContent = '✅ ' + job.projectName + ' 交付完成';
-    document.getElementById('progETA').textContent = '已用时 ' + formatETA(elapsed/1000);
+    barWrap.className = 'prog-bar done';
+    document.getElementById('progTitle').textContent = '✅ ' + job.projectName + ' 完成';
+    document.getElementById('progETA').textContent = '用时 ' + formatETA(elapsed/1000);
     document.getElementById('jobIndicator').style.display = 'none';
     if (job.nasDir) { copyText(job.nasDir); toast('✅ 完成！NAS路径已复制', 'success'); }
     setTimeout(function() { document.getElementById('progressPanel').classList.remove('show'); }, 4000);
   } else if (job.status === 'cancelled') {
+    barWrap.className = 'prog-bar';
     document.getElementById('progTitle').textContent = '⏸ 已取消';
     document.getElementById('jobIndicator').style.display = 'none';
     setTimeout(function() { document.getElementById('progressPanel').classList.remove('show'); }, 2000);
   } else if (job.status === 'error') {
+    barWrap.className = 'prog-bar error';
     document.getElementById('progTitle').textContent = '❌ 出错';
     document.getElementById('jobIndicator').style.display = 'none';
   } else {
+    barWrap.className = 'prog-bar';
     document.getElementById('progTitle').textContent = '📁 ' + job.projectName + ' · ' + job.type;
     document.getElementById('jobIndicator').style.display = 'flex';
     document.getElementById('jobIndicatorText').textContent = pct + '%';
@@ -990,6 +1067,22 @@ function applyKeyword() {
   settings.keyword = $('keywordInput').value;
   api.put('/api/settings', { keyword: settings.keyword });
   refreshDetail();
+}
+
+// 从模板填充项目对话框
+function applyTemplateToDialog(cfg) {
+  if (!cfg) return;
+  const set = (id, val) => { const el = $(id); if (el && val != null) el.value = val; };
+  set('dlgLocal', cfg.localDir);
+  set('dlgNas', cfg.nasDir);
+  set('dlgMemo', cfg.memo);
+  set('dlgEpisodeTarget', cfg.episodeTarget);
+  if (cfg.episodeAssignments && cfg.episodeAssignments.length) {
+    const list = document.getElementById('dlgAssignList');
+    if (list) list.innerHTML = '';
+    for (const a of cfg.episodeAssignments) addEpisodeAssign(a.name, a.start, a.end);
+  }
+  toast('模板字段已填入，请检查后保存', 'success');
 }
 
 // ==================== 服务状态 & 重启 ====================
@@ -1345,6 +1438,20 @@ async function showSettings() {
       '</div>' +
     '</div>' +
     (appVersion ? '<div class="fg"><label>版本</label><span style="font-size:13px;color:#64748b">v' + esc(appVersion) + '</span></div>' : '') +
+    '<div class="fg">' +
+      '<label>扩展功能</label>' +
+      '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px">' +
+        '<button class="btn btn-sm btn-outline" onclick="window.showExtTab(\'scheduler\')" style="font-size:11px">定时自动化</button>' +
+        '<button class="btn btn-sm btn-outline" onclick="window.showExtTab(\'notify\')" style="font-size:11px">通知渠道</button>' +
+        '<button class="btn btn-sm btn-outline" onclick="window.showExtTab(\'hooks\')" style="font-size:11px">钩子</button>' +
+        '<button class="btn btn-sm btn-outline" onclick="window.showExtTab(\'storage\')" style="font-size:11px">存储后端</button>' +
+        '<button class="btn btn-sm btn-outline" onclick="window.showExtTab(\'auth\')" style="font-size:11px">用户</button>' +
+        '<button class="btn btn-sm btn-outline" onclick="window.showExtTab(\'workflow\')" style="font-size:11px">工作流</button>' +
+        '<button class="btn btn-sm btn-outline" onclick="window.Features.showAuditLogs()" style="font-size:11px">📜 操作日志</button>' +
+        '<button class="btn btn-sm btn-outline" onclick="window.Features.showWebDAVInfo()" style="font-size:11px">🌐 WebDAV</button>' +
+      '</div>' +
+      '<div id="extPanel" style="min-height:100px;border:1px solid #e2e8f0;border-radius:7px;padding:12px;font-size:12px;color:#64748b">点击上方按钮管理扩展功能</div>' +
+    '</div>' +
     '<div class="fg" style="margin-bottom:0">' +
       '<label>关于</label>' +
       '<p style="font-size:12px;color:#64748b;line-height:1.6">项目档案管理器<br>项目档案交付 NAS 管理工具<br>支持初版交付、修改交付、000交付<br>集数监控 · 桌面通知 · 托盘最小化</p>' +

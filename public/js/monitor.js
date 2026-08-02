@@ -4,11 +4,7 @@ let _monitorLastReady = false;
 let _monitorNotifySent = {};
 let _monitorLastStatus = '';        // 上次项目状态，切换时重置
 
-function requestNotifyPermission() {
-  if (window.electronAPI && window.electronAPI.isElectron) return;
-  if (!('Notification' in window)) return;
-  if (Notification.permission === 'default') Notification.requestPermission();
-}
+// requestNotifyPermission 定义在 app.js 中，此处不重复定义
 
 function sendNotify(title, body) {
   if (typeof sendDesktopNotify === 'function') {

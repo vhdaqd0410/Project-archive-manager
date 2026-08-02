@@ -12,15 +12,19 @@ router.post('/scan', (req, res) => {
 
 // 部门模板（作为 /import/templates 使用）
 router.get('/templates', (req, res) => res.json(shared.settings.templates || []));
-router.put('/templates', (req, res) => {
+router.put('/templates', async (req, res) => {
   if (!Array.isArray(req.body.templates)) return res.status(400).json({ error: 'templates 必须是数组' });
   shared.settings.templates = req.body.templates;
-  projectService.saveSettings(shared.settings);
-  res.json({ success: true });
+  try {
+    await projectService.saveSettings(shared.settings);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: '保存失败: ' + e.message });
+  }
 });
 
 // 批量导入
-router.post('/batch', (req, res) => {
+router.post('/batch', async (req, res) => {
   const { items } = req.body;
   if (!Array.isArray(items) || !items.length) return res.status(400).json({ error: 'items 不能为空' });
   const added = [];
@@ -30,8 +34,12 @@ router.post('/batch', (req, res) => {
     shared.projects.push({ id: crypto.randomUUID(), name: item.name.trim(), localDir: item.localDir.trim(), nasDir: (item.nasDir || '').trim(), status: 'editing', createdAt: new Date().toISOString() });
     added.push(item);
   }
-  projectService.saveProjects(shared.projects);
-  res.json({ success: true, added: added.length });
+  try {
+    await projectService.saveProjects(shared.projects);
+    res.json({ success: true, added: added.length });
+  } catch (e) {
+    res.status(500).json({ error: '导入保存失败: ' + e.message });
+  }
 });
 
 module.exports = router;

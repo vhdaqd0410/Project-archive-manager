@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul
 set CSC=C:\Windows\Microsoft.NET\Framework\v4.0.30319\csc.exe
 set REFS=System.dll,System.Windows.Forms.dll,System.Drawing.dll,System.Core.dll,System.Data.dll,System.Web.Extensions.dll
 

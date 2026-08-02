@@ -1,11 +1,14 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-<meta charset="UTF-8"><title>项目档案管理器</title>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self' data:">
+<title>项目档案管理器</title>
 <link rel="stylesheet" href="/css/style.css">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='bg' x1='0' y1='0' x2='0' y2='1'><stop offset='0%' stop-color='%233B82F6'/><stop offset='100%' stop-color='%232563EB'/></linearGradient></defs><rect width='100' height='100' rx='22' fill='url(%23bg)'/><path d='M22 0h32a8 8 0 018 8v-2c0 4.4-3.6 8-8 8H22a8 8 0 01-8-8v6c0 4.4 3.6 8 8 8z' fill='%231D4ED8' transform='translate(0,9)'/><rect x='10' y='28' width='80' height='62' rx='12' fill='white'/><polyline points='35,55 45,65 65,40' fill='none' stroke='%2322C55E' stroke-width='8' stroke-linecap='round' stroke-linejoin='round'/></svg>">
 </head>
 <body>
+<noscript><div style="padding:20px;text-align:center;color:#ef4444;font-size:16px">本应用需要 JavaScript 支持才能运行，请在浏览器设置中启用 JavaScript。</div></noscript>
 
 <div id="header">
   <span class="logo">项目档案管理器</span>
@@ -16,6 +19,7 @@
     <input id="keywordInput" placeholder="识别关键字">
     <button class="btn btn-sm btn-primary" onclick="applyKeyword()">应用并扫描</button>
     <button id="themeToggle" onclick="toggleTheme()" title="切换主题">🌙</button>
+    <button id="dashboardBtn" onclick="window.toggleDashboard()" title="统计仪表盘" style="width:32px;height:32px;border:none;border-radius:6px;background:#f1f5f9;cursor:pointer;font-size:16px;transition:all .15s;display:flex;align-items:center;justify-content:center">📊</button>
     <button id="settingsBtn" onclick="showSettings()" title="设置" style="width:32px;height:32px;border:none;border-radius:6px;background:#f1f5f9;cursor:pointer;font-size:16px;transition:all .15s;display:flex;align-items:center;justify-content:center">⚙️</button>
   </div>
 </div>
@@ -24,19 +28,25 @@
 <div id="statusDrop"></div>
 <div id="progressPanel">
   <div class="prog-hdr"><span class="title" id="progTitle">📁 待启动</span><button class="close-btn" title="最小化到后台" onclick="hideProgress()">&times;</button></div>
-  <div class="prog-bar"><div class="fill" id="progFill"></div></div>
-  <div style="display:flex;justify-content:space-between;font-size:12px;margin:4px 0">
-    <span style="color:#3b82f6;font-weight:700" id="progPct">0%</span>
-    <span style="color:#94a3b8" id="progFile">准备中</span>
-  </div>
-  <div style="display:flex;justify-content:space-between;font-size:11px;color:#64748b;margin-bottom:4px">
-    <span id="progStats"></span>
-    <span id="progSpeed"></span>
-    <span id="progETA" style="color:#f59e0b"></span>
-  </div>
-  <div class="prog-actions">
-    <button class="btn btn-outline" id="progCancel" onclick="cancelCurrentJob()">⏸ 取消任务</button>
-    <button class="btn btn-sm btn-outline" onclick="showDashboard()">📋 后台任务</button>
+  <div class="prog-body">
+    <div class="prog-bar" id="progBarWrap"><div class="fill" id="progFill"></div></div>
+    <div class="prog-stats-row">
+      <span class="prog-pct" id="progPct">0%</span>
+      <span class="prog-file-name" id="progFile">准备中</span>
+    </div>
+    <div class="prog-meta">
+      <span class="stat"><span class="icon">✓</span><span id="progStats"></span></span>
+      <span class="stat"><span class="icon">⚡</span><span id="progSpeed"></span></span>
+      <span class="stat"><span class="icon">⏱</span><span id="progETA" style="color:var(--warn)"></span></span>
+    </div>
+    <div class="prog-file-list" id="progFileList" style="display:none"></div>
+    <div class="prog-actions">
+      <button class="btn btn-sm btn-outline" id="progToggleList" onclick="toggleProgFileList()">📄 文件列表</button>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-sm btn-outline" onclick="showDashboard()">📋 后台</button>
+        <button class="btn btn-sm btn-warn" id="progCancel" onclick="cancelCurrentJob()">⏸ 取消</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -45,11 +55,14 @@
   <div id="dashboardBody" style="max-height:300px;overflow-y:auto;font-size:11px"></div>
 </div>
 
+<div id="dashboardPanel2" style="display:none;position:fixed;top:50px;left:50%;transform:translateX(-50%);width:90%;max-width:900px;background:#0f172a;border:1px solid rgba(255,255,255,.1);border-radius:12px;z-index:1000;box-shadow:0 8px 32px rgba(0,0,0,.4)"></div>
+
 <div id="main">
   <div id="sidebar">
     <div class="sidebar-hdr"><span>项目列表</span><span class="badge" id="projectCount">0</span></div>
     <div id="projectStats" style="padding:2px 16px;font-size:10px;color:#64748b"></div>
     <input id="searchInput" placeholder="搜索项目..." oninput="debounceSearch()">
+    <div id="tagFilterBar"></div>
     <div id="batchBar" style="display:none;padding:4px 10px;border-bottom:1px solid rgba(255,255,255,.05);flex-shrink:0">
       <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">
         <button class="btn btn-sm btn-outline" onclick="batchSelectAll()" style="background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.1);color:#cbd5e1;font-size:11px">全选</button>
@@ -87,8 +100,13 @@
   <div class="modal-body" id="modalBody"></div>
 </div></div>
 
+<script src="/js/chart.umd.js"></script>
 <script src="/js/app.js"></script>
 <script src="/js/monitor.js"></script>
+<script src="/js/sse.js"></script>
+<script src="/js/dashboard.js"></script>
+<script src="/js/extended.js"></script>
+<script src="/js/features.js"></script>
 <script>
 document.getElementById('splitter').onmousedown = function(e) {
   e.preventDefault();

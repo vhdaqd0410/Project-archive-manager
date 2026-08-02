@@ -42,3 +42,14 @@ desktop.ini
 
 # Mac 压缩包残留
 __MACOSX
+
+# Reasonix / WorkBuddy 工具文件
+.reasonix/
+.workbuddy/
+reasonix.toml
+
+# Python 虚拟环境
+.venv/
+
+# 分析报告（临时文件）
+代码优化分析报告.md
