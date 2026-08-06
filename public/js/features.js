@@ -142,7 +142,7 @@
     const overlay = document.getElementById('modalOverlay');
     document.getElementById('modalTitle').textContent = '📋 从模板创建';
     let templates = [];
-    try { templates = await api.get('/api/templates'); } catch(e) {}
+    try { templates = await api.get('/api/import/templates'); } catch(e) {}
     let html = '';
     if (!templates.length) {
       html = '<div style="padding:20px;text-align:center;color:var(--text-muted)">暂无模板。<br>在项目编辑中可以保存当前项目为模板。</div>';
@@ -150,13 +150,15 @@
       html = '<div style="max-height:300px;overflow-y:auto">';
       for (const t of templates) {
         const cfg = t.config || {};
-        html += `<div style="padding:10px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;cursor:pointer" onclick="window.Features.applyTemplate('${t.id}','${callback}')">`;
-        html += `<div style="font-weight:600;font-size:13px">${esc(t.name)}</div>`;
+        html += `<div style="padding:10px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;display:flex;align-items:center;justify-content:space-between" onclick="window.Features.applyTemplate('${t.id}','${callback}')">`;
+        html += `<div style="flex:1;cursor:pointer"><div style="font-weight:600;font-size:13px">${esc(t.name)}</div>`;
         html += `<div style="font-size:11px;color:var(--text-muted);margin-top:2px">`;
         if (cfg.episodeTarget) html += `🎯 ${cfg.episodeTarget}集 `;
         if (cfg.nasDir) html += `📁 ${esc(cfg.nasDir)} `;
         if (cfg.tags && cfg.tags.length) html += `🏷️ ${cfg.tags.length}标签`;
         html += `</div></div>`;
+        html += `<button class="btn btn-sm btn-outline" style="color:#ef4444;border-color:#ef444430;padding:2px 8px;font-size:11px" onclick="event.stopPropagation();window.Features.deleteTemplate('${t.id}','${callback}')">✕</button>`;
+        html += `</div>`;
       }
       html += '</div>';
     }
@@ -165,9 +167,18 @@
     overlay.style.display = 'flex';
   }
 
+  async function deleteTemplate(id, callback) {
+    if (!confirm('确定删除此模板？')) return;
+    try {
+      await api.del('/api/import/templates/' + id);
+      toast('模板已删除', 'success');
+      showTemplatePicker(callback);
+    } catch(e) { toast('删除失败: ' + e.message, 'error'); }
+  }
+
   async function applyTemplate(templateId, callback) {
     try {
-      const t = await api.get('/api/templates/' + templateId);
+      const t = await api.get('/api/import/templates/' + templateId);
       const cfg = t.config || {};
       window.closeModal();
       if (window[callback]) window[callback](cfg);
@@ -185,7 +196,7 @@
       episodeAssignments: projectData.episodeAssignments,
       memo: projectData.memo,
     };
-    await api.post('/api/templates', { name, config });
+    await api.post('/api/import/templates', { name, config });
     toast('模板已保存', 'success');
   }
 
@@ -386,6 +397,7 @@
     showTemplatePicker,
     applyTemplate,
     saveAsTemplate,
+    deleteTemplate,
     showAuditLogs,
     refreshAuditLogs,
     showFilePreview,

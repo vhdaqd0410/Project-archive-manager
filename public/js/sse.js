@@ -27,15 +27,12 @@
   function connect() {
     if (eventSource) {
       try { eventSource.close(); } catch (e) {}
+      eventSource = null;
     }
     try {
       eventSource = new EventSource('/api/events');
-      connected = true;
-      reconnectAttempts = 0; // 连接成功，重置退避计数
-
-      // 更新服务状态指示器
-      const indicator = document.getElementById('serverIndicator');
-      if (indicator) indicator.textContent = '🟢 实时连接';
+      // 注意：connected 不在此处置位，等 onopen 真正建立后再置位，避免「假在线」导致 pollJob 降频
+      reconnectAttempts = 0;
 
       Object.keys(handlers).forEach(function(eventName) {
         eventSource.addEventListener(eventName, function(e) {
@@ -48,9 +45,21 @@
         });
       });
 
+      // 连接真正建立后才置位 connected 并更新指示器
+      eventSource.onopen = function() {
+        connected = true;
+        reconnectAttempts = 0;
+        const indicator = document.getElementById('serverIndicator');
+        if (indicator) indicator.textContent = '🟢 实时连接';
+      };
+
       eventSource.onerror = function() {
         connected = false;
+        const indicator = document.getElementById('serverIndicator');
         if (indicator) indicator.textContent = '🔴 已断开，重连中...';
+        // 必须先 close，否则浏览器 EventSource 会自动重连，与下方手动重连并存导致连接泄漏
+        try { eventSource.close(); } catch (e) {}
+        eventSource = null;
         // 指数退避重连：1s → 2s → 4s → 8s → 16s → 30s（上限）
         reconnectAttempts++;
         const delay = Math.min(RECONNECT_BASE * Math.pow(2, reconnectAttempts - 1), RECONNECT_MAX);
@@ -59,6 +68,7 @@
       };
     } catch (e) {
       console.error('SSE 连接失败:', e);
+      connected = false;
       // 降级为轮询模式
       reconnectAttempts++;
       const delay = Math.min(RECONNECT_BASE * Math.pow(2, reconnectAttempts - 1), RECONNECT_MAX);
@@ -87,7 +97,7 @@
 
   // 任务进度
   on('job:progress', function(data) {
-    if (typeof window !== 'undefined' && window.currentJobId && window.currentJobId === data.id) {
+    if (typeof window !== 'undefined' && window._currentJobId && window._currentJobId === data.id) {
       updateProgressUI(data);
     }
     // 更新任务指示器
@@ -101,8 +111,11 @@
 
   // 任务完成
   on('job:complete', function(data) {
-    if (typeof window !== 'undefined' && window.currentJobId && window.currentJobId === data.id) {
-      completeProgressUI(data);
+    if (typeof window !== 'undefined' && window._currentJobId && window._currentJobId === data.id) {
+      // updateProgressUI 已处理 done/cancelled/error 状态样式
+      updateProgressUI(data);
+      // 立即 resolve pollJob 的 Promise，让 refreshDetail 尽快执行（不必等 2s 轮询兜底）
+      if (typeof window._resolvePollJob === 'function') window._resolvePollJob(data);
     }
     // 如果有进度面板，隐藏
     setTimeout(function() {
@@ -138,11 +151,15 @@
 
   // 通知
   on('notification', function(data) {
-    // 浏览器通知
+    // 统一走 NotificationManager（内部已处理桌面通知 + toast + 历史）
+    if (window.NotificationManager) {
+      window.NotificationManager.notify(data.title, data.body, data.level || 'info');
+      return;
+    }
+    // 兜底：浏览器通知 + toast
     if ('Notification' in window && Notification.permission === 'granted') {
       new Notification(data.title, { body: data.body });
     }
-    // 同时显示 toast
     if (typeof toast === 'function') {
       toast(data.title + ': ' + data.body, data.level || 'info');
     }

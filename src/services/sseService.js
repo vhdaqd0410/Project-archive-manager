@@ -62,6 +62,7 @@ function broadcast(event, data) {
 function pushJobProgress(job) {
   broadcast('job:progress', {
     id: job.id,
+    projectName: job.projectName,
     type: job.type,
     current: job.current,
     totalItems: job.totalItems,
@@ -69,6 +70,9 @@ function pushJobProgress(job) {
     failed: job.failed,
     skipped: job.skipped,
     status: job.status,
+    nasDir: job.nasDir || '',
+    totalBytes: job.totalBytes || 0,
+    currentItem: job.items ? (job.items[job.current - 1] || {}) : {},
     elapsed: job.startTime ? ((job.endTime || Date.now()) - job.startTime) : 0,
   });
 }
@@ -76,12 +80,17 @@ function pushJobProgress(job) {
 function pushJobComplete(job) {
   broadcast('job:complete', {
     id: job.id,
+    projectName: job.projectName,
     type: job.type,
     status: job.status,
+    current: job.current,
+    totalItems: job.totalItems,
     completed: job.completed,
     failed: job.failed,
     skipped: job.skipped,
+    nasDir: job.nasDir || '',
     totalBytes: job.totalBytes || 0,
+    currentItem: job.items ? (job.items[job.current - 1] || {}) : {},
     elapsed: job.startTime ? (job.endTime - job.startTime) : 0,
   });
 }

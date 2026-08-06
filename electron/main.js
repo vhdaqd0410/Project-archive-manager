@@ -5,6 +5,9 @@ const path = require('path');
 const { fork } = require('child_process');
 const fs = require('fs');
 
+// 统一从 package.json 读取版本号，避免多处硬编码
+const APP_VERSION = require('../package.json').version;
+
 // Windows 通知必须设置 AppUserModelId
 if (process.platform === 'win32') {
   app.setAppUserModelId('com.pam.project-archive-manager');
@@ -195,19 +198,43 @@ app.on('second-instance', () => {
 });
 
 function startServer() {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     serverProcess = fork(path.join(__dirname, '..', 'server.js'), [], {
       env: { ...process.env, PORT: String(PORT), ELECTRON: '1' },
       silent: true, stdio: 'pipe'
     });
+    let settled = false;
+    const done = (ok, reason) => {
+      if (settled) return;
+      settled = true;
+      ok ? resolve() : reject(new Error(reason || '服务启动失败'));
+    };
     serverProcess.stdout.on('data', (d) => {
       const s = d.toString();
       process.stdout.write(s);
-      if (s.includes('已启动')) resolve();
+      if (s.includes('已启动')) done(true);
     });
-    serverProcess.stderr.on('data', (d) => process.stderr.write(d.toString()));
-    setTimeout(() => resolve(), 4000);
+    serverProcess.stderr.on('data', (d) => {
+      const s = d.toString();
+      process.stderr.write(s);
+      if (s.includes('EADDRINUSE')) done(false, '端口 ' + PORT + ' 被占用，可能有另一个实例正在运行');
+    });
+    serverProcess.on('exit', (code) => {
+      if (code !== 0) done(false, '服务进程异常退出 (code=' + code + ')');
+    });
+    serverProcess.on('error', (e) => done(false, '无法启动服务进程: ' + e.message));
+    setTimeout(() => done(false, '服务启动超时'), 8000);
   });
+}
+
+// ── 启动失败 / 加载失败的兜底错误页 ──
+function errorPageHtml(title, detail) {
+  return '<!doctype html><meta charset="utf-8"><style>body{font-family:"Microsoft YaHei",sans-serif;background:#0f172a;color:#e2e8f0;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;padding:20px;text-align:center}.box{max-width:520px;padding:32px;background:#1e293b;border-radius:14px;border:1px solid #334155}.icon{font-size:54px;margin-bottom:8px}h1{font-size:18px;margin:8px 0 4px;color:#f59e0b}p{color:#94a3b8;font-size:13px;line-height:1.6;margin:8px 0 18px}.code{background:#0f172a;padding:10px;border-radius:6px;font-family:Consolas,monospace;font-size:12px;color:#f87171;text-align:left;word-break:break-all;margin:10px 0}.btn{display:inline-block;background:#2563eb;color:#fff;border:none;border-radius:8px;padding:10px 22px;font-size:14px;cursor:pointer;margin:4px}.btn:hover{background:#1d4ed8}.btn.outline{background:transparent;border:1px solid #475569;color:#cbd5e1}</style><div class="box"><div class="icon">⚠️</div><h1>' + title + '</h1><p>项目档案管理器桌面版无法连接到后端服务。</p><div class="code">' + (detail || '').replace(/</g, '&lt;') + '</div><div><button class="btn" onclick="location.reload()">重试</button></div><p style="font-size:11px;margin-top:14px;color:#64748b">按 <kbd style="background:#0f172a;padding:1px 6px;border-radius:3px;border:1px solid #475569">Ctrl+Shift+I</kbd> 查看开发者工具 · 端口 ' + PORT + ' 可能被占用，请关闭其他正在运行的实例后重试。</p></div>';
+}
+
+function showErrorPage(detail) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(errorPageHtml('服务启动失败', detail)));
 }
 
 // 安全的 IPC 消息发送辅助函数
@@ -258,7 +285,7 @@ function buildMenu() {
     {
       label: '帮助',
       submenu: [
-        { label: '关于项目档案管理器', click: () => dialog.showMessageBox(mainWindow, { type: 'info', title: '关于', message: '项目档案管理器 v2.6.0', detail: '项目档案交付 NAS 管理工具\nElectron 桌面版\n\n拖放文件夹到窗口即可导入\nCtrl+Shift+D 全局热键呼出' }) },
+        { label: '关于项目档案管理器', click: () => dialog.showMessageBox(mainWindow, { type: 'info', title: '关于', message: '项目档案管理器 v' + APP_VERSION, detail: '项目档案交付 NAS 管理工具\nElectron 桌面版\n\n拖放文件夹到窗口即可导入\nCtrl+Shift+D 全局热键呼出' }) },
         { label: '打开数据目录', click: () => shell.openPath(path.join(__dirname, '..', 'data')) }
       ]
     }
@@ -285,6 +312,18 @@ function createTray() {
   } catch (e) { console.error('[Tray] 创建托盘失败:', e.message); }
 }
 
+// 更新托盘 tooltip 显示未读通知数
+function updateTrayUnread(count) {
+  if (!tray) return;
+  try {
+    if (count > 0) {
+      tray.setToolTip('项目档案管理器 — ' + count + ' 条未读通知');
+    } else {
+      tray.setToolTip('项目档案管理器 — 运行中');
+    }
+  } catch (e) {}
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400, height: 900, minWidth: 960, minHeight: 620,
@@ -300,6 +339,18 @@ function createWindow() {
   });
 
   mainWindow.loadURL('http://localhost:' + PORT);
+
+  // 加载失败兜底（例如服务未就绪）→ 显示错误页 + 重试
+  mainWindow.webContents.on('did-fail-load', (_e, errorCode, errorDescription, validatedURL) => {
+    if (errorCode === -3) return; // ABORTED（reload 等正常中断），忽略
+    if (validatedURL && validatedURL.startsWith('data:')) return; // 错误页本身不再触发
+    showErrorPage('页面加载失败: ' + (errorDescription || 'HTTP ' + errorCode));
+  });
+
+  // 开发模式：自动打开 DevTools 便于诊断
+  if (process.env.PAM_DEV === '1' || process.argv.includes('--dev')) {
+    mainWindow.webContents.openDevTools({ mode: 'detach' });
+  }
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
@@ -322,21 +373,34 @@ function createWindow() {
   mainWindow.on('closed', () => { mainWindow = null; });
 }
 
-// 目录监听
+// 目录监听（300ms 防抖，避免大目录被刷爆）
+const _watchDebounces = new Map(); // projectId -> timer
 function startWatch(dirPath, projectId) {
   if (activeWatchers[projectId] || !dirPath || !fs.existsSync(dirPath)) return;
   try {
     const w = fs.watch(dirPath, { recursive: true }, () => {
-      sendToRenderer('fs:changed', projectId);
+      // 防抖：短时间内多个事件合并为一次推送
+      const existing = _watchDebounces.get(projectId);
+      if (existing) clearTimeout(existing);
+      const t = setTimeout(() => {
+        _watchDebounces.delete(projectId);
+        sendToRenderer('fs:changed', projectId);
+      }, 300);
+      if (t.unref) t.unref();
+      _watchDebounces.set(projectId, t);
     });
     activeWatchers[projectId] = w;
   } catch (e) {}
 }
 function stopWatch(projectId) {
   if (activeWatchers[projectId]) { activeWatchers[projectId].close(); delete activeWatchers[projectId]; }
+  const t = _watchDebounces.get(projectId);
+  if (t) { clearTimeout(t); _watchDebounces.delete(projectId); }
 }
 function stopAllWatches() {
   for (const id of Object.keys(activeWatchers)) { try { activeWatchers[id].close(); } catch (e) {} delete activeWatchers[id]; }
+  for (const [id, t] of _watchDebounces) { clearTimeout(t); }
+  _watchDebounces.clear();
 }
 
 // IPC
@@ -360,14 +424,28 @@ ipcMain.handle('select-folder-import', async () => {
   return { success: true, path: r.filePaths[0], name: path.basename(r.filePaths[0]) };
 });
 // IPC — 原生桌面通知
-ipcMain.handle('show-notification', async (_e, { title, body }) => {
+// 支持可选 action + payload：点击通知时把 action 派发回渲染进程（用于一键交付）
+ipcMain.handle('show-notification', async (_e, { title, body, action, payload }) => {
   if (!Notification.isSupported()) return { success: false, error: '系统不支持通知' };
   try {
     const n = new Notification({ title, body, icon: getAppIcon(256) });
-    n.on('click', () => { if (mainWindow) { mainWindow.show(); mainWindow.focus(); } });
+    n.on('click', () => {
+      if (mainWindow) {
+        if (mainWindow.isMinimized()) mainWindow.restore();
+        if (!mainWindow.isVisible()) mainWindow.show();
+        mainWindow.focus();
+        // 把点击动作与携带数据派发到渲染进程
+        if (action) sendToRenderer('notification:click', { action, payload: payload || null });
+      }
+    });
     n.show();
     return { success: true };
   } catch (e) { return { success: false, error: e.message }; }
+});
+
+// IPC — 通知中心未读数（更新托盘 tooltip）
+ipcMain.on('notification-unread', (_e, count) => {
+  updateTrayUnread(count || 0);
 });
 
 // IPC — 设置相关
@@ -429,12 +507,20 @@ autoUpdater.on('update-downloaded', () => {
     if (r.response === 0) { autoUpdater.quitAndInstall(false, true); }
   });
 });
-autoUpdater.on('error', function() { /* 静默处理 */ });
+autoUpdater.on('error', function(err) { console.error('[autoUpdater] 更新失败:', err && err.message ? err.message : err); });
 
 app.whenReady().then(async () => {
   registerGlobalHotkey(_globalHotkeyAccel);
-  await startServer();
+  let serverError = null;
+  try {
+    await startServer();
+  } catch (e) {
+    serverError = e;
+    console.error('[main] 服务启动失败:', e.message);
+  }
   createWindow();
+  // 服务启动失败时显式显示错误页（did-fail-load 也会兜底，这里即时反馈）
+  if (serverError) showErrorPage(serverError.message);
   // 窗口创建后再初始化托盘（此时 mainWindow 已就绪）
   createTray();
   // 绑定最小化到托盘的气泡提示

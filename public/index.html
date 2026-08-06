@@ -19,12 +19,27 @@
     <input id="keywordInput" placeholder="识别关键字">
     <button class="btn btn-sm btn-primary" onclick="applyKeyword()">应用并扫描</button>
     <button id="themeToggle" onclick="toggleTheme()" title="切换主题">🌙</button>
+    <button id="notifyBtn" onclick="window.NotificationManager.toggleCenter()" title="通知" style="width:32px;height:32px;border:none;border-radius:6px;background:#f1f5f9;cursor:pointer;font-size:16px;transition:all .15s;display:flex;align-items:center;justify-content:center;position:relative">🔔<span id="notifyBadge" style="display:none;position:absolute;top:-2px;right:-2px;background:#ef4444;color:#fff;border-radius:10px;padding:0 5px;font-size:10px;min-width:16px;text-align:center">0</span></button>
     <button id="dashboardBtn" onclick="window.toggleDashboard()" title="统计仪表盘" style="width:32px;height:32px;border:none;border-radius:6px;background:#f1f5f9;cursor:pointer;font-size:16px;transition:all .15s;display:flex;align-items:center;justify-content:center">📊</button>
+    <button id="monthlyBtn" onclick="window.MonthlyReport && window.MonthlyReport.show()" title="月度统计报告" style="width:32px;height:32px;border:none;border-radius:6px;background:#f1f5f9;cursor:pointer;font-size:16px;transition:all .15s;display:flex;align-items:center;justify-content:center">📈</button>
+    <button id="editorBtn" onclick="showEditorView()" title="剪辑师工作台" style="width:32px;height:32px;border:none;border-radius:6px;background:#f1f5f9;cursor:pointer;font-size:16px;transition:all .15s;display:flex;align-items:center;justify-content:center">👥</button>
+    <button id="kanbanBtn" onclick="showKanban()" title="看板视图" style="width:32px;height:32px;border:none;border-radius:6px;background:#f1f5f9;cursor:pointer;font-size:16px;transition:all .15s;display:flex;align-items:center;justify-content:center">🗂️</button>
     <button id="settingsBtn" onclick="showSettings()" title="设置" style="width:32px;height:32px;border:none;border-radius:6px;background:#f1f5f9;cursor:pointer;font-size:16px;transition:all .15s;display:flex;align-items:center;justify-content:center">⚙️</button>
   </div>
 </div>
 
 <div id="toastContainer"></div>
+<div id="notifyCenter" style="display:none;position:fixed;top:54px;right:12px;width:340px;max-height:70vh;background:#0f172a;border:1px solid rgba(255,255,255,.1);border-radius:12px;z-index:1000;box-shadow:0 8px 32px rgba(0,0,0,.4);overflow:hidden;flex-direction:column">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid rgba(255,255,255,.08)">
+    <span style="font-size:13px;font-weight:600;color:#e2e8f0">🔔 通知中心</span>
+    <div style="display:flex;gap:6px">
+      <button onclick="window.NotificationManager.markAllRead()" style="background:none;border:1px solid #475569;border-radius:5px;color:#94a3b8;font-size:11px;padding:2px 8px;cursor:pointer">全部已读</button>
+      <button onclick="window.NotificationManager.clearAll()" style="background:none;border:1px solid #475569;border-radius:5px;color:#94a3b8;font-size:11px;padding:2px 8px;cursor:pointer">清空</button>
+      <button onclick="window.NotificationManager.toggleCenter()" style="background:none;border:none;color:#94a3b8;font-size:16px;cursor:pointer;line-height:1">×</button>
+    </div>
+  </div>
+  <div id="notifyCenterBody" style="flex:1;overflow-y:auto"></div>
+</div>
 <div id="statusDrop"></div>
 <div id="progressPanel">
   <div class="prog-hdr"><span class="title" id="progTitle">📁 待启动</span><button class="close-btn" title="最小化到后台" onclick="hideProgress()">&times;</button></div>
@@ -75,6 +90,7 @@
         <span id="batchCount" style="font-size:10px;color:#94a3b8;margin-left:4px"></span>
       </div>
     </div>
+    <div id="recentBar" style="display:none;flex-wrap:wrap;gap:4px;padding:6px 10px;border-bottom:1px solid rgba(255,255,255,.05);background:rgba(59,130,246,.03)"></div>
     <div id="projectList"></div>
     <div class="sidebar-btns">
       <button class="sbtn sbtn-new" onclick="showProjectDlg(-1)">+ 新建项目</button>
@@ -100,13 +116,15 @@
   <div class="modal-body" id="modalBody"></div>
 </div></div>
 
-<script src="/js/chart.umd.js"></script>
-<script src="/js/app.js"></script>
-<script src="/js/monitor.js"></script>
-<script src="/js/sse.js"></script>
-<script src="/js/dashboard.js"></script>
-<script src="/js/extended.js"></script>
-<script src="/js/features.js"></script>
+<script src="/js/chart.umd.js?v=2.7.1"></script>
+<script src="/js/notifications.js?v=2.7.1"></script>
+<script src="/js/app.js?v=2.7.1"></script>
+<script src="/js/monitor.js?v=2.7.1"></script>
+<script src="/js/sse.js?v=2.7.1"></script>
+<script src="/js/dashboard.js?v=2.7.1"></script>
+<script src="/js/extended.js?v=2.7.1"></script>
+<script src="/js/features.js?v=2.7.1"></script>
+<script src="/js/monthly-report.js?v=2.7.1"></script>
 <script>
 document.getElementById('splitter').onmousedown = function(e) {
   e.preventDefault();

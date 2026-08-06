@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const fs = require('fs');
 const path = require('path');
-const { execSync, execFile } = require('child_process');
+const { execFile, spawn } = require('child_process');
 const projectService = require('../services/projectService');
 const shared = require('./shared');
 const { mountJobRoutes } = require('./jobs');
@@ -21,6 +21,12 @@ router.use('/', require('./sse'));
 
 // ── 项目统计仪表盘 (Feature 3) ──
 router.use('/stats', require('./stats'));
+
+// ── 数据备份 ──
+router.use('/backup', require('./backup'));
+
+// ── 项目导出/导入 ──
+router.use('/transfer', require('./dataTransfer'));
 
 // ── 归档报告导出 (Feature 2) ──
 router.use('/reports', require('./reports'));
@@ -80,8 +86,11 @@ router.get('/delivery-log', (req, res) => {
 });
 
 // ── 导出 / 导入备份 ──
+// 版本号统一来自 package.json，避免多处硬编码
+const APP_VERSION = require('../../package.json').version;
+
 router.get('/export/backup', (req, res) => {
-  const backup = { exportedAt: new Date().toISOString(), version: '2.1', projects: shared.projects, settings: shared.settings, deliveryLog: projectService.loadDeliveryLog() };
+  const backup = { exportedAt: new Date().toISOString(), version: APP_VERSION, projects: shared.projects, settings: shared.settings, deliveryLog: projectService.loadDeliveryLog() };
   res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent('项目档案管理器备份_' + new Date().toISOString().slice(0, 10))}.json"`);
   res.json(backup);
 });
@@ -111,11 +120,10 @@ router.post('/import/backup', async (req, res) => {
   }
 });
 
-// ── 文件夹浏览 ──
-router.post('/pick-folder', (req, res) => {
-  // 安全模式：用环境变量传递结果路径，避免脚本注入
+// ── 文件夹浏览（异步执行 PowerShell，避免阻塞事件循环）──
+router.post('/pick-folder', async (req, res) => {
   const os = require('os');
-  const resultFile = path.join(os.tmpdir(), 'pam_pf_' + Date.now() + '.txt');
+  const resultFile = path.join(os.tmpdir(), 'pam_pf_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8) + '.txt');
 
   // 将 PS 脚本 Base64 编码，避免路径中包含特殊字符导致注入
   const psScript = [
@@ -129,23 +137,43 @@ router.post('/pick-folder', (req, res) => {
   ].join('\n');
   const psB64 = Buffer.from('\uFEFF' + psScript, 'utf16le').toString('base64');
 
-  try {
-    execSync(
-      `powershell.exe -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${psB64}`,
-      { timeout: 120000, windowsHide: true, env: { ...process.env, PAM_RESULT_FILE: resultFile } }
-    );
+  // 用 spawn 异步执行，事件循环保持畅通（不阻塞 SSE 心跳/复制进度推送）
+  const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', psB64], {
+    windowsHide: true,
+    env: { ...process.env, PAM_RESULT_FILE: resultFile }
+  });
+  let settled = false;
+  const cleanup = () => { try { fs.existsSync(resultFile) && fs.unlinkSync(resultFile); } catch (_) {} };
+  // 120s 超时兜底
+  const timer = setTimeout(() => {
+    if (settled) return;
+    settled = true;
+    try { child.kill(); } catch (_) {}
+    cleanup();
+    res.json({ success: false, path: '', error: '超时或取消' });
+  }, 120000);
+  if (timer.unref) timer.unref();
 
+  child.on('exit', () => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
     let sel = '';
-    if (fs.existsSync(resultFile)) {
-      sel = fs.readFileSync(resultFile, 'utf8').replace(/^\uFEFF/, '').trim();
-      try { fs.unlinkSync(resultFile); } catch (e) { /* 清理失败忽略 */ }
-    }
+    try {
+      if (fs.existsSync(resultFile)) {
+        sel = fs.readFileSync(resultFile, 'utf8').replace(/^\uFEFF/, '').trim();
+      }
+    } catch (_) {}
+    cleanup();
     res.json({ success: true, path: sel });
-  } catch (e) {
-    // 清理残留文件
-    try { if (fs.existsSync(resultFile)) fs.unlinkSync(resultFile); } catch (_) {}
-    res.json({ success: false, path: '', error: e.message || '超时或取消' });
-  }
+  });
+  child.on('error', (e) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    cleanup();
+    res.json({ success: false, path: '', error: e.message || '启动失败' });
+  });
 });
 
 // ── 打开资源管理器 ──

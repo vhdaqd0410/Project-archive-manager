@@ -5,6 +5,7 @@
   "main": "electron/main.js",
   "scripts": {
     "start": "node server.js",
+    "dev:electron": "cross-env PAM_DEV=1 electron .",
     "electron": "electron .",
     "build": "electron-builder --win portable",
     "build:installer": "electron-builder --win nsis"
@@ -20,7 +21,6 @@
       "server.js",
       "src/**/*",
       "public/**/*",
-      "data/**/*",
       "node_modules/**/*",
       "package.json"
     ],
@@ -60,6 +60,7 @@
     "node-cron": "^4.6.0"
   },
   "devDependencies": {
+    "cross-env": "^7.0.3",
     "electron": "^35.7.5",
     "electron-builder": "^25.0.0",
     "electron-updater": "^6.8.9"

@@ -7,6 +7,7 @@ let _monitorLastStatus = '';        // 上次项目状态，切换时重置
 // requestNotifyPermission 定义在 app.js 中，此处不重复定义
 
 function sendNotify(title, body) {
+  if (window.NotificationManager) { window.NotificationManager.notify(title, body, 'info'); return; }
   if (typeof sendDesktopNotify === 'function') {
     sendDesktopNotify(title, body).catch(function() {});
     return;

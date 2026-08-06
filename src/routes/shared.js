@@ -2,9 +2,12 @@
 
 const projectService = require('../services/projectService');
 const crypto = require('crypto');
+const config = require('../config');
 
 const projects = projectService.loadProjects();
 const settings = projectService.loadSettings();
+// 确保部门预设存在（新建项目快捷模式用）
+if (!settings.departments) settings.departments = config.defaults.departments;
 
 // 初始化默认值
 projects.forEach(p => {
@@ -13,6 +16,7 @@ projects.forEach(p => {
   if (!p.memo) p.memo = '';
   if (!p.episodeTarget) p.episodeTarget = 0;
   if (!p.episodeAssignments) p.episodeAssignments = [];
+  if (p.pinned === undefined) p.pinned = false;
 });
 
 function findIndexById(id) {

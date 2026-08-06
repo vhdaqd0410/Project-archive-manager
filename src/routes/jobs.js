@@ -4,6 +4,20 @@ const crypto = require('crypto');
 const config = require('../config');
 const runningJobs = {};
 
+// 已完成任务在内存中保留 30 分钟，便于前端轮询查询最终状态
+const DONE_TTL_MS = 30 * 60 * 1000;
+const cleanupTimers = new WeakMap();
+
+function scheduleCleanup(job) {
+  if (cleanupTimers.has(job)) clearTimeout(cleanupTimers.get(job));
+  const timer = setTimeout(() => {
+    if (runningJobs[job.id] === job) delete runningJobs[job.id];
+  }, DONE_TTL_MS);
+  // Allow process to exit even if timer is pending
+  if (timer.unref) timer.unref();
+  cleanupTimers.set(job, timer);
+}
+
 function createJob(projectId, projectName, totalItems, type) {
   const jobId = crypto.randomUUID();
   const job = {
@@ -18,7 +32,11 @@ function createJob(projectId, projectName, totalItems, type) {
   if (keys.length > config.defaults.maxRunningJobs) {
     const doneKeys = keys.filter(k => runningJobs[k].status === 'done');
     const toRemove = Math.max(0, doneKeys.length - config.defaults.maxKeptDoneJobs);
-    for (const k of doneKeys.slice(0, toRemove)) delete runningJobs[k];
+    for (const k of doneKeys.slice(0, toRemove)) {
+      const j = runningJobs[k];
+      if (j) { const t = cleanupTimers.get(j); if (t) clearTimeout(t); }
+      delete runningJobs[k];
+    }
   }
   return job;
 }
@@ -35,6 +53,8 @@ function finishJob(job, status, resultData) {
   job.status = status;
   job.endTime = Date.now();
   Object.assign(job, resultData);
+  // 已完成（含取消/失败），调度自动清理
+  scheduleCleanup(job);
 }
 
 function getJob(jobId) { return runningJobs[jobId] || null; }

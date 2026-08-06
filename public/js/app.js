@@ -37,7 +37,18 @@ function copyText(text) { navigator.clipboard.writeText(text).catch(() => {}); s
 
 function addLog(msg) {
   const t = new Date().toLocaleTimeString();
-  const lc = $('logContent'); if (lc) lc.innerHTML += '<div>[' + t + '] ' + esc(msg) + '</div>';
+  const lc = $('logContent');
+  if (lc) {
+    // 用 appendChild 代替 innerHTML+=，避免整段重新序列化
+    const div = document.createElement('div');
+    const ts = document.createElement('span');
+    ts.textContent = '[' + t + '] ';
+    div.appendChild(ts);
+    const txt = document.createElement('span');
+    txt.textContent = msg; // textContent 自动转义，等价于 esc()
+    div.appendChild(txt);
+    lc.appendChild(div);
+  }
   const lp = $('logPanel'); if (lp) lp.scrollTop = lp.scrollHeight;
 }
 
@@ -134,11 +145,14 @@ async function setProjectStatus(idx, status) {
   let drop = document.getElementById('statusDrop');
   drop.classList.remove('show');
   const pid = projects[idx].id;
-  await api.put('/api/projects/' + pid + '/status', { status });
-  projects[idx].status = status;
-  renderProjectList();
-  if (sel === idx) selectProject(idx);
-  toast('状态已更新', 'success');
+  try {
+    const r = await api.put('/api/projects/' + pid + '/status', { status });
+    if (r && r.error) { toast('状态更新失败: ' + r.error, 'error'); return; }
+    projects[idx].status = status;
+    renderProjectList();
+    if (sel === idx) selectProject(idx);
+    toast('状态已更新', 'success');
+  } catch (e) { toast('状态更新失败: ' + (e.message || '未知错误'), 'error'); }
 }
 
 // ==================== 右键菜单 ====================
@@ -149,7 +163,10 @@ function showContextMenu(e, idx) {
   drop.innerHTML = '';
   let actions = [
     { label: '✏️ 编辑项目', action: function() { showProjectDlg(idx); } },
+    { label: p.pinned ? '📍 取消置顶' : '📌 置顶', action: function() { togglePin(idx); } },
+    { label: '📋 克隆项目', action: function() { cloneProject(idx); } },
     { label: '🎯 设置目标集数', action: function() { setEpisodeTarget(idx); } },
+    { label: '🔍 NAS对账', action: function() { selectProject(idx); setTimeout(showReconcile, 100); } },
     { label: '🗑 删除项目', action: function() { delProject(); } },
     { label: '📂 打开本地目录', action: function() { openFolder(p.localDir); } },
     { label: '📂 打开NAS目录', action: function() { openFolder(p.nasDir); } },
@@ -209,18 +226,20 @@ function renderProjectList() {
 
   // 排序：按创建时间或名称
   const sorted = projects.map(function(p, i) { return { p: p, i: i }; });
-  if (_sortBy === 'time') {
-    sorted.sort(function(a, b) { return (b.p.createdAt || '').localeCompare(a.p.createdAt || ''); });
-  } else {
-    sorted.sort(function(a, b) { return a.p.name.localeCompare(b.p.name); });
-  }
+  sorted.sort(function(a, b) {
+    if (a.p.pinned !== b.p.pinned) return a.p.pinned ? -1 : 1;
+    if (_sortBy === 'time') return (b.p.createdAt || '').localeCompare(a.p.createdAt || '');
+    return a.p.name.localeCompare(b.p.name);
+  });
 
   const groups = { editing: [], modifying: [], done: [] };
   const tagFilter = window.Features ? window.Features.getTagFilter() : null;
   for (const item of sorted) {
     if (search && item.p.name.toLowerCase().indexOf(search) < 0) continue;
     if (tagFilter && (!item.p._tagObjs || !item.p._tagObjs.some(t => t.id === tagFilter))) continue;
-    const g = item.p.status === 'done' ? 'done' : item.p.status === 'modifying' ? 'modifying' : 'editing';
+    const s = item.p.status;
+    // 已移除的状态（initial/000/archive）归到「剪辑中」分组，避免项目丢失
+    const g = groups[s] !== undefined ? s : 'editing';
     groups[g].push(item.i);
   }
   const groupConfig = [
@@ -263,7 +282,7 @@ function renderGroup(list, cfg, indices) {
       + '<span class="item-status">'
       + '<button class="status-btn" title="' + statusTitle + ' · 点击切换" onclick="toggleStatusMenu(event,\'' + p.id + '\',' + idx + ')">' + statusIcon + '</button>'
       + '</span>'
-      + esc(p.name);
+      + (p.pinned ? '<span style="margin-right:2px" title="已置顶">📌</span>' : '') + esc(p.name);
     d.onclick = (function(i) { return function() { selectProject(i); }; })(idx);
     // 右键菜单
     d.addEventListener('contextmenu', (function(i) {
@@ -288,11 +307,12 @@ function selectProject(idx) {
   const rp = $('rightPanel');
   if (idx < 0) { rp.innerHTML = '<div class="empty">请从左侧选择项目，或新建项目</div>'; return; }
   const p = projects[idx];
+  if (typeof recordRecentAction === 'function') recordRecentAction('view', p.name, p.id);
   rp.innerHTML =
     '<div class="card"><div class="card-hdr">📂 项目目录</div><div class="card-body"><div class="info-row"><span class="lbl">本地</span><span class="val" id="infoLocalDir">' + esc(p.localDir || '-') + '</span></div><div class="info-row"><span class="lbl">NAS</span><span class="val" id="infoNasDir">' + esc(p.nasDir || '-') + '<span id="nasStatus" style="margin-left:8px;font-size:11px"></span></span></div>' + (p.memo ? '<div class="info-row"><span class="lbl">备注</span><span class="val" style="color:#f59e0b">' + esc(p.memo) + '</span></div>' : '') + '</div></div>' +
     '<div class="card"><div class="card-hdr">🔍 关键词目录检测</div><div class="card-body"><div id="detectLocal" style="font-size:12px;color:#94a3b8">扫描中...</div><div id="detectNas" style="font-size:12px;color:#94a3b8">扫描中...</div><div id="detectSummary" style="font-size:12px;margin-top:4px"></div></div></div>' +
-    '<div class="act-bar"><button class="btn btn-primary" id="btnOpenLocal">打开本地</button><button class="btn btn-primary" id="btnOpenNas">打开NAS</button><button class="btn btn-outline" id="btnCopyPath">复制NAS路径</button><button class="btn btn-outline" id="btnCopyMsg">复制交付信息</button><button class="btn btn-outline" id="btnTags">🏷️ 标签</button><button class="btn btn-outline" id="btnPreview">🎬 预览</button><button class="btn btn-outline" id="btnRollback">↩️ 回滚</button><button class="btn btn-outline" id="btnTemplate">📋 存模板</button></div>' +
-    '<div class="card"><div class="card-hdr">⚠ 待交付文件 <span id="pendingCount" style="margin-left:8px">0</span></div><div class="card-body"><div class="pending-list" id="pendingList"></div><div class="act-bar"><button class="btn btn-sm btn-outline" id="btnRefresh">刷新</button><button class="btn btn-sm btn-outline" id="btnCheckAll">全选</button><button class="btn btn-sm btn-outline" id="btnUncheckAll">取消全选</button><button class="btn btn-sm btn-warn" id="btnCopy">复制选中到NAS</button></div></div></div>' +
+    '<div class="act-bar"><button class="btn btn-primary" id="btnOpenLocal">打开本地</button><button class="btn btn-primary" id="btnOpenNas">打开NAS</button><button class="btn btn-outline" id="btnCopyPath">复制NAS路径</button><button class="btn btn-outline" id="btnCopyMsg">复制交付信息</button><button class="btn btn-outline" id="btnTags">🏷️ 标签</button><button class="btn btn-outline" id="btnPreview">🎬 预览</button><button class="btn btn-outline" id="btnRollback">↩️ 回滚</button><button class="btn btn-outline" id="btnTemplate">📋 存模板</button><button class="btn btn-outline" id="btnHistory" onclick="showCopyHistory()">📊 历史</button><button class="btn btn-outline" id="btnTimeline" onclick="showTimeline()">🕐 时间轴</button><button class="btn btn-outline" id="btnTodo" onclick="showTodos()">✅ 待办</button></div>' +
+    '<div class="card"><div class="card-hdr">⚠ 待交付文件 <span id="pendingCount" style="margin-left:8px">0</span></div><div class="card-body"><div class="pending-list" id="pendingList"></div><div class="act-bar"><button class="btn btn-sm btn-outline" id="btnRefresh">刷新</button><button class="btn btn-sm btn-outline" id="btnCheckAll">全选</button><button class="btn btn-sm btn-outline" id="btnUncheckAll">取消全选</button><button class="btn btn-sm btn-accent" id="btnQuickCopy" onclick="quickCopyAll()">⚡ 全部复制</button><button class="btn btn-sm btn-outline" id="btnQuality" onclick="runQualityCheck()">🔍 质检</button><button class="btn btn-sm btn-warn" id="btnCopy">复制选中到NAS</button></div></div></div>' +
     '<div class="card"><div class="card-hdr">🎬 上映单集版 · 修改交付 <span id="modifyCount" style="margin-left:8px">0</span></div><div class="card-body"><div id="modifyInfo" style="font-size:11px;color:#94a3b8">检测中...</div><div id="modifySummary" style="font-size:12px;margin:4px 0"></div><div class="pending-list" id="modifyList"></div><div class="act-bar"><button class="btn btn-sm btn-primary" id="btnModOpenLocal">打开本地</button><button class="btn btn-sm btn-primary" id="btnModOpenNas">打开NAS</button><button class="btn btn-sm btn-outline" id="btnModRefresh">刷新</button><button class="btn btn-sm btn-outline" id="btnModCheckAll">全选</button><button class="btn btn-sm btn-outline" id="btnModUncheckAll">取消全选</button><button class="btn btn-sm btn-outline" id="btnModCopyPath">复制路径</button><button class="btn btn-sm btn-warn" id="btnModCopy">复制选中到NAS</button></div></div></div>' +
     '<div class="card"><div class="card-hdr">📦 000交付 <span id="count000" style="margin-left:8px">0</span></div><div class="card-body"><div id="info000" style="font-size:11px;color:#94a3b8">检测中...</div><div id="summary000" style="font-size:12px;margin:4px 0"></div><div class="pending-list" id="list000"></div><div class="act-bar"><button class="btn btn-sm btn-primary" id="btn000OpenLocal">打开本地</button><button class="btn btn-sm btn-primary" id="btn000OpenNas">打开NAS</button><button class="btn btn-sm btn-outline" id="btn000Refresh">刷新</button><button class="btn btn-sm btn-outline" id="btn000CheckAll">全选</button><button class="btn btn-sm btn-outline" id="btn000UncheckAll">取消全选</button><button class="btn btn-sm btn-outline" id="btn000CopyPath">复制路径</button><button class="btn btn-sm btn-warn" id="btn000Copy">复制选中到NAS</button></div></div></div>' +
     '<div class="card"><div class="card-hdr">📋 运行日志</div><div class="card-body" id="logPanel" style="max-height:200px;overflow-y:auto;font-family:Consolas,monospace;font-size:11px;color:#64748b;padding:8px 12px"><div id="logContent">就绪</div></div></div>' +
@@ -454,8 +474,18 @@ function showProjectDlg(editIdx) {
   const p = editIdx >= 0 ? projects[editIdx] : { name: '', localDir: '', nasDir: '', memo: '', status: 'editing' };
   const s = p.status || 'editing';
   let h = '';
-  // 新建模式时显示模板选择
+  // 新建模式时显示快捷创建 + 模板选择
   if (editIdx < 0) {
+    const depts = (settings.departments || []);
+    let deptOpts = '<option value="">选择部门...</option>';
+    for (const d of depts) deptOpts += '<option value="' + escAttr(d.id) + '">' + esc(d.name) + '</option>';
+    h += '<div style="background:rgba(59,130,246,.06);border:1px solid rgba(59,130,246,.2);border-radius:8px;padding:10px;margin-bottom:10px">'
+      + '<div style="font-size:12px;color:#3b82f6;margin-bottom:6px">⚡ 快速创建（选部门自动拼接本地/NAS路径）</div>'
+      + '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">'
+      + '<select id="dlgDept" onchange="applyDeptShortcut()" style="background:#1e293b;border:1px solid #475569;color:#e2e8f0;border-radius:5px;padding:5px 8px;font-size:12px;outline:none">' + deptOpts + '</select>'
+      + '<input id="dlgDeptName" placeholder="项目名（如 H0133-xxx）" oninput="applyDeptShortcut()" style="flex:1;min-width:180px;background:#1e293b;border:1px solid #475569;color:#e2e8f0;border-radius:5px;padding:5px 8px;font-size:12px;outline:none">'
+      + '<input id="dlgDeptMonth" placeholder="月份(如8月)" oninput="applyDeptShortcut()" style="display:none;width:80px;background:#1e293b;border:1px solid #475569;color:#e2e8f0;border-radius:5px;padding:5px 8px;font-size:12px;outline:none">'
+      + '</div><div id="dlgDeptPreview" style="font-size:11px;color:#94a3b8;margin-top:6px"></div></div>';
     h += '<div class="fg" style="display:flex;gap:6px;align-items:center"><button class="btn btn-sm btn-accent" onclick="window.Features.showTemplatePicker(\'applyTemplateToDialog\')">📋 从模板创建</button><span style="font-size:11px;color:var(--text-muted)">或手动填写下方信息</span></div>';
   }
   h += '<div class="fg"><label>项目名称</label><input id="dlgName" value="' + escAttr(p.name) + '"></div>';
@@ -502,6 +532,7 @@ async function saveProject(editIdx) {
   renderProjectList();
   // 通过 ID 重新定位项目（避免数组顺序变化导致选错）
   const newIdx = projects.findIndex(function(p) { return p.id === savedId; });
+  if (typeof recordRecentAction === 'function') recordRecentAction('edit', data.name, savedId);
   selectProject(newIdx >= 0 ? newIdx : projects.length - 1);
 }
 
@@ -735,18 +766,30 @@ async function copy000Delivery() {
 // ==================== 进度条系统（重新设计：文件级列表 + 实时速度 + ETA + SSE驱动）====================
 let _currentJobId = null;
 let _pollTimer = null;
+let _pollResolve = null;       // pollJob 当前 Promise 的 resolve，用于重入时释放旧 Promise
+let _progHideTimer = null;     // 进度面板自动隐藏定时器，新任务启动时需清理
 let _fsProgressBytes = 0;
 let _jobStartTime = Date.now();
 let _progFileListVisible = false;
-let _progFileLog = []; // 记录每个文件的处理状态
+let _progFileLog = []; // 记录每个文件的处理状态（截断到 200 条，防内存膨胀）
+const _progFileLogMax = 200;
 
 function formatBytes(b) { return b >= 1073741824 ? (b/1073741824).toFixed(1)+'GB' : b>=1048576 ? (b/1048576).toFixed(1)+'MB' : b>=1024 ? (b/1024).toFixed(1)+'KB' : b+'B'; }
 function formatETA(sec) { if (sec<=0) return ''; let m=Math.floor(sec/60),s=Math.floor(sec%60); return (m>0?m+'分':'')+s+'秒'; }
 
-function startProgress(title, total) {
-  _currentJobId = null;
-  _progFileLog = [];
+// 终结旧的轮询任务：释放悬挂的 Promise，清理定时器（避免 pollJob 重入时旧 await 永久挂起）
+function _abortPolling(result) {
   if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+  if (_pollResolve) { const r = _pollResolve; _pollResolve = null; r(result || { status: 'superseded' }); }
+}
+
+function startProgress(title, total) {
+  // 终结任何残留的轮询/隐藏定时器，避免新任务被旧定时器干扰
+  _abortPolling();
+  if (_progHideTimer) { clearTimeout(_progHideTimer); _progHideTimer = null; }
+  _currentJobId = null;
+  window._currentJobId = null;
+  _progFileLog = [];
   _jobStartTime = Date.now();
   let panel = document.getElementById('progressPanel');
   document.getElementById('progTitle').textContent = title;
@@ -786,13 +829,16 @@ function updateProgressUI(job) {
   document.getElementById('progPct').textContent = pct + '%';
 
   let item = job.currentItem || {};
-  document.getElementById('progFile').textContent = (item.name || '...') + ' ' + (job.current || 0) + '/' + job.totalItems;
+  // 运行中显示旋转图标，让用户明确感知系统在复制大文件（避免 current 长时间不变误以为卡住）
+  let prefix = (job.status === 'running' && item.name) ? '⏳ ' : '';
+  document.getElementById('progFile').textContent = prefix + (item.name || '...') + ' ' + (job.current || 0) + '/' + job.totalItems;
 
-  // 记录文件状态
+  // 记录文件状态（截断到 200 条，防长任务内存膨胀）
   if (item.name && item.status) {
     const lastEntry = _progFileLog[_progFileLog.length - 1];
     if (!lastEntry || lastEntry.name !== item.name || lastEntry.status !== item.status) {
       _progFileLog.push({ name: item.name, status: item.status });
+      if (_progFileLog.length > _progFileLogMax) _progFileLog = _progFileLog.slice(-_progFileLogMax);
       if (_progFileListVisible) renderProgFileList();
     }
   }
@@ -826,12 +872,12 @@ function updateProgressUI(job) {
     document.getElementById('progETA').textContent = '用时 ' + formatETA(elapsed/1000);
     document.getElementById('jobIndicator').style.display = 'none';
     if (job.nasDir) { copyText(job.nasDir); toast('✅ 完成！NAS路径已复制', 'success'); }
-    setTimeout(function() { document.getElementById('progressPanel').classList.remove('show'); }, 4000);
+    _progHideTimer = setTimeout(function() { document.getElementById('progressPanel').classList.remove('show'); _progHideTimer = null; }, 4000);
   } else if (job.status === 'cancelled') {
     barWrap.className = 'prog-bar';
     document.getElementById('progTitle').textContent = '⏸ 已取消';
     document.getElementById('jobIndicator').style.display = 'none';
-    setTimeout(function() { document.getElementById('progressPanel').classList.remove('show'); }, 2000);
+    _progHideTimer = setTimeout(function() { document.getElementById('progressPanel').classList.remove('show'); _progHideTimer = null; }, 2000);
   } else if (job.status === 'error') {
     barWrap.className = 'prog-bar error';
     document.getElementById('progTitle').textContent = '❌ 出错';
@@ -845,36 +891,55 @@ function updateProgressUI(job) {
 }
 
 async function pollJob(jobId) {
+  // 终结任何残留的旧轮询：释放旧 Promise，避免旧 await 永久挂起
+  _abortPolling();
   _currentJobId = jobId;
-  if (_pollTimer) clearInterval(_pollTimer);
+  window._currentJobId = jobId; // 同步给 SSE 模块（实时进度推送）
   _jobStartTime = Date.now();
 
+  // 暴露给 SSE 模块：SSE 收到 job:complete 时立即 resolve（不等 2s 轮询），让 refreshDetail 尽快执行
+  window._resolvePollJob = function(job) {
+    if (_currentJobId !== jobId) return; // 已被新任务接管
+    if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+    _currentJobId = null; window._currentJobId = null;
+    document.getElementById('jobIndicator').style.display = 'none';
+    let extra = '';
+    if (job.status === 'done') { extra = '成功' + job.completed + (job.skipped>0?'/跳过'+job.skipped:'') + (job.failed>0?'/失败'+job.failed:''); addLog('✅ 完成：' + extra); }
+    else if (job.status === 'cancelled') { addLog('⏸ 已取消'); }
+    else { addLog('❌ 出错：' + (job.error||'')); }
+    if (_pollResolve) { const r = _pollResolve; _pollResolve = null; r(job); }
+  };
+
   return new Promise(function(resolve) {
+    _pollResolve = resolve;
+    // SSE 在线时降频轮询到 2s（仅作兜底，主进度由 SSE 推送）；SSE 断线时 300ms 高频轮询
+    const sseOnline = !!(window.SSE && window.SSE.isConnected());
+    const interval = sseOnline ? 2000 : 300;
     _pollTimer = setInterval(async function() {
+      // 已被新任务接管，停止当前轮询（不调 resolve，新任务自己会处理）
+      if (_currentJobId !== jobId) { clearInterval(_pollTimer); _pollTimer = null; return; }
       try {
         let job = await api.get('/api/jobs/' + jobId);
+        // await 期间可能已被新任务接管，再次校验
+        if (_currentJobId !== jobId) { clearInterval(_pollTimer); _pollTimer = null; return; }
         updateProgressUI(job);
 
         if (job.status === 'done' || job.status === 'cancelled' || job.status === 'error') {
-          clearInterval(_pollTimer); _pollTimer = null; _currentJobId = null;
-          document.getElementById('jobIndicator').style.display = 'none';
-          let extra = '';
-          if (job.status === 'done') { extra = '成功' + job.completed + (job.skipped>0?'/跳过'+job.skipped:'') + (job.failed>0?'/失败'+job.failed:''); addLog('✅ 完成：' + extra); }
-          else if (job.status === 'cancelled') { addLog('⏸ 已取消'); }
-          else { addLog('❌ 出错：' + (job.error||'')); }
-          resolve(job);
+          if (window._resolvePollJob) window._resolvePollJob(job);
         }
       } catch (e) { /* 继续 */ }
-    }, 300);
+    }, interval);
   });
 }
 
 function finishProgress(status, msg) {
-  if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+  _abortPolling({ status: status || 'error' });
   _currentJobId = null;
+  window._currentJobId = null;
   document.getElementById('jobIndicator').style.display = 'none';
   document.getElementById('progTitle').textContent = '❌ ' + (msg || '失败');
-  setTimeout(function() { document.getElementById('progressPanel').classList.remove('show'); }, 3000);
+  if (_progHideTimer) { clearTimeout(_progHideTimer); }
+  _progHideTimer = setTimeout(function() { document.getElementById('progressPanel').classList.remove('show'); _progHideTimer = null; }, 3000);
 }
 
 function cancelCurrentJob() {
@@ -896,7 +961,8 @@ function showDashboard() {
   if (panel.classList.contains('show')) { panel.classList.remove('show'); if (_dashboardTimer) clearInterval(_dashboardTimer); return; }
   panel.classList.add('show');
   refreshDashboard();
-  _dashboardTimer = setInterval(refreshDashboard, 1500);
+  // SSE 已有 job:progress 推送，轮询放宽到 5s 仅作兜底
+  _dashboardTimer = setInterval(refreshDashboard, 5000);
 }
 
 async function refreshDashboard() {
@@ -1026,12 +1092,16 @@ async function pickFolder(inputId) {
 
 // Electron 原生打开文件夹（稳定，不依赖 explorer.exe 命令行解析）
 async function openFolder(dirPath) {
-  if (!dirPath) return;
-  if (window.electronAPI && window.electronAPI.isElectron) {
-    await window.electronAPI.openExplorer(dirPath);
-  } else {
-    await api.post('/api/open-explorer', { path: dirPath });
-  }
+  if (!dirPath) { toast('路径为空', 'warn'); return; }
+  try {
+    if (window.electronAPI && window.electronAPI.isElectron) {
+      const r = await window.electronAPI.openExplorer(dirPath);
+      if (r && r.success === false) toast('打开失败: ' + (r.error || '路径不存在或不可访问'), 'error');
+    } else {
+      const r = await api.post('/api/open-explorer', { path: dirPath });
+      if (r && r.success === false) toast('打开失败: ' + (r.error || '路径不存在'), 'error');
+    }
+  } catch (e) { toast('打开失败: ' + (e.message || '未知错误'), 'error'); }
 }
 
 function copyCheckedPaths(listId, baseDir) {
@@ -1190,38 +1260,166 @@ function toggleTheme() {
 }
 
 // ==================== 导出/导入配置备份 ====================
-async function exportBackup() {
+// ==================== 项目导出/导入 (JSON) ====================
+async function exportProjects() {
   try {
-    const res = await fetch('/api/export/backup');
+    const res = await fetch('/api/transfer/export');
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     const d = new Date();
-    a.download = '项目档案管理器备份_' + d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + '.json';
+    a.download = '项目导出_' + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '.json';
     a.click();
     URL.revokeObjectURL(url);
-    toast('备份已导出', 'success');
+    toast('已导出 ' + projects.length + ' 个项目', 'success');
   } catch (e) { toast('导出失败: ' + e.message, 'error'); }
 }
 
 async function importBackup(input) {
   const file = input.files[0];
   if (!file) return;
-  if (!confirm('确定要导入备份数据？不会覆盖已存在的同名项目。')) return;
   try {
     const text = await file.text();
     const data = JSON.parse(text);
-    if (!data.projects) { toast('无效的备份文件', 'error'); return; }
-    const r = await api.post('/api/import/backup', { projects: data.projects, settings: data.settings });
+    if (!data.projects) { toast('无效的文件', 'error'); return; }
+    const mode = confirm('点"确定"=合并模式(同名跳过)\n点"取消"=替换模式(清空后导入)') ? 'merge' : 'replace';
+    if (mode === 'replace' && !confirm('⚠️ 替换模式会清空当前所有项目！确认继续？')) { input.value = ''; return; }
+    const r = await api.post('/api/transfer/import', { projects: data.projects, settings: data.settings, mode });
     if (r.success) {
       projects = await api.get('/api/projects');
       settings = await api.get('/api/settings');
       renderProjectList();
-      toast('成功导入 ' + r.added + ' 个项目（共 ' + r.total + ' 个）', 'success');
+      toast('导入成功: 新增 ' + r.added + ' 个, 跳过 ' + r.skipped + ' 个', 'success');
     }
   } catch (e) { toast('导入失败: ' + e.message, 'error'); }
   input.value = '';
+}
+
+// ==================== 数据库备份管理 ====================
+async function showBackupManager() {
+  $('modalTitle').textContent = '💾 数据库备份';
+  $('modalBody').innerHTML = '<div id="backupList" style="padding:20px;text-align:center;color:#94a3b8">加载中...</div>'
+    + '<div class="modal-btns"><button class="btn btn-outline" onclick="closeModal()">关闭</button></div>';
+  $('modalOverlay').style.display = 'flex';
+  await refreshBackupList();
+}
+
+async function refreshBackupList() {
+  try {
+    const r = await api.get('/api/backup');
+    const list = r.backups || [];
+    const body = document.getElementById('backupList');
+    if (!body) return;
+    if (!list.length) {
+      body.innerHTML = '<div style="padding:30px;text-align:center;color:#94a3b8">暂无备份<br><button class="btn btn-primary" onclick="createBackupNow()" style="margin-top:10px">立即创建备份</button></div>';
+      return;
+    }
+    body.innerHTML =
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'
+      + '<span style="font-size:12px;color:#94a3b8">共 ' + list.length + ' 份备份（自动保留最近 7 份）</span>'
+      + '<button class="btn btn-sm btn-primary" onclick="createBackupNow()">+ 立即备份</button></div>'
+      + '<div style="max-height:300px;overflow-y:auto">'
+      + list.map(function(b) {
+          const size = b.size > 1048576 ? (b.size/1048576).toFixed(1)+'MB' : (b.size/1024).toFixed(0)+'KB';
+          const time = new Date(b.mtime).toLocaleString('zh-CN');
+          return '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.06)">'
+            + '<div><div style="font-size:12px;color:#e2e8f0">' + esc(b.name) + '</div>'
+            + '<div style="font-size:10px;color:#94a3b8">' + time + ' · ' + size + '</div></div>'
+            + '<button class="btn btn-sm btn-warn" onclick="restoreBackup(\'' + escAttr(b.name) + '\')">恢复</button></div>';
+        }).join('')
+      + '</div>';
+  } catch (e) {
+    document.getElementById('backupList').innerHTML = '<div style="color:#ef4444">加载失败: ' + esc(e.message) + '</div>';
+  }
+}
+
+async function createBackupNow() {
+  try {
+    const r = await api.post('/api/backup', {});
+    if (r.success) { toast('备份已创建', 'success'); refreshBackupList(); }
+    else toast('备份失败', 'error');
+  } catch (e) { toast('备份失败: ' + e.message, 'error'); }
+}
+
+async function restoreBackup(name) {
+  if (!confirm('⚠️ 确定从「' + name + '」恢复数据库？\n\n当前数据库会被覆盖（恢复前会自动备份当前状态）。\n恢复后需重启服务。')) return;
+  try {
+    const r = await api.post('/api/backup/restore', { backupName: name });
+    if (r.success) toast('已恢复,请重启服务生效', 'success');
+    else toast('恢复失败', 'error');
+  } catch (e) { toast('恢复失败: ' + e.message, 'error'); }
+}
+
+// ==================== 剪辑师工作台 ====================
+async function showEditorView() {
+  const panel = document.getElementById('dashboardPanel2');
+  if (!panel) return;
+  panel.style.display = 'block';
+  panel.innerHTML = '<div style="padding:40px;text-align:center;color:#94a3b8">👥 加载中...</div>';
+  try {
+    const r = await (await fetch('/api/stats/editor-view')).json();
+    renderEditorView(panel, r);
+  } catch (e) {
+    panel.innerHTML = '<div style="padding:40px;text-align:center;color:#ef4444">加载失败: ' + esc(e.message) + '</div>';
+  }
+}
+
+function renderEditorView(panel, data) {
+  const editors = data.editors || [];
+  const cards = editors.map(function(e) {
+    const projectsHtml = e.projects.map(function(p) {
+      return '<div style="padding:6px 8px;border-bottom:1px solid rgba(255,255,255,.05);font-size:11px;cursor:pointer" onclick="jumpToProject(\'' + p.projectId + '\')">'
+        + '<div style="display:flex;justify-content:space-between;align-items:center">'
+        + '<span style="color:#e2e8f0">' + esc(p.projectName) + '</span>'
+        + '<span style="font-size:10px;color:#94a3b8">' + (p.status === 'done' ? '✅' : p.status === 'modifying' ? '🟠' : '🔵') + ' 第' + esc(p.assignedRange) + '集</span>'
+        + '</div></div>';
+    }).join('');
+    return '<div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);border-radius:10px;overflow:hidden;margin-bottom:12px">'
+      + '<div style="padding:12px 14px;background:rgba(59,130,246,.06);border-bottom:1px solid rgba(59,130,246,.2)">'
+      + '<div style="display:flex;justify-content:space-between;align-items:center">'
+      + '<div><span style="font-size:14px;font-weight:600;color:#e2e8f0">' + esc(e.name) + '</span>'
+      + '<span style="font-size:11px;color:#94a3b8;margin-left:8px">' + e.projectCount + ' 个项目</span></div>'
+      + '<div style="font-size:12px;color:#22c55e">负责 ' + e.totalAssigned + ' 集</div></div></div>'
+      + '<div style="max-height:200px;overflow-y:auto">' + projectsHtml + '</div></div>';
+  }).join('');
+
+  panel.innerHTML =
+    '<div style="padding:24px;max-height:88vh;overflow-y:auto">'
+    + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px">'
+    + '<h2 style="margin:0;font-size:18px;color:#e2e8f0">👥 剪辑师工作台</h2>'
+    + '<button onclick="document.getElementById(\'dashboardPanel2\').style.display=\'none\'" style="background:none;border:1px solid #475569;color:#94a3b8;width:28px;height:28px;border-radius:6px;cursor:pointer;font-size:16px">×</button>'
+    + '</div>'
+    + (cards || '<div style="padding:30px;text-align:center;color:#94a3b8">暂无剪辑师分配记录</div>')
+    + '</div>';
+}
+
+function jumpToProject(pid) {
+  const idx = projects.findIndex(function(p) { return p.id === pid; });
+  if (idx >= 0) {
+    document.getElementById('dashboardPanel2').style.display = 'none';
+    selectProject(idx);
+  }
+}
+
+// ==================== 最近操作快捷区 ====================
+let _recentActions = [];
+function recordRecentAction(type, name, projectId) {
+  _recentActions.unshift({ type: type, name: name, projectId: projectId, time: Date.now() });
+  if (_recentActions.length > 8) _recentActions.pop();
+  renderRecentBar();
+}
+
+function renderRecentBar() {
+  const bar = document.getElementById('recentBar');
+  if (!bar) return;
+  if (!_recentActions.length) { bar.style.display = 'none'; return; }
+  bar.style.display = 'flex';
+  bar.innerHTML = '<span style="font-size:11px;color:#94a3b8;margin-right:6px;white-space:nowrap">最近:</span>'
+    + _recentActions.slice(0, 5).map(function(a) {
+        const icon = a.type === 'deliver' ? '📦' : a.type === 'edit' ? '✏️' : a.type === 'copy' ? '📋' : '•';
+        return '<span style="font-size:11px;color:#cbd5e1;cursor:pointer;padding:2px 8px;background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.2);border-radius:10px;white-space:nowrap" onclick="jumpToProject(\'' + a.projectId + '\')" title="' + escAttr(a.time ? new Date(a.time).toLocaleTimeString('zh-CN') : '') + '">' + icon + ' ' + esc(a.name) + '</span>';
+      }).join('');
 }
 
 // ==================== 键盘快捷键（可自定义） ====================
@@ -1383,7 +1581,7 @@ function onFsChanged(projectId) {
 if (window.electronAPI && window.electronAPI.isElectron) {
   window.electronAPI.onMessage('menu:new-project', () => showProjectDlg(-1));
   window.electronAPI.onMessage('menu:import-folder', () => triggerFileDialog());
-  window.electronAPI.onMessage('menu:export-backup', () => exportBackup());
+  window.electronAPI.onMessage('menu:export-backup', () => exportProjects());
   window.electronAPI.onMessage('menu:import-backup', () => document.getElementById('importFileInput').click());
   window.electronAPI.onMessage('drop:import-folder', (fp) => handleDropImport(fp));
   window.electronAPI.onMessage('fs:changed', (projectId) => onFsChanged(projectId));
@@ -1432,8 +1630,9 @@ async function showSettings() {
     '<div class="fg">' +
       '<label>数据管理</label>' +
       '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
-        '<button class="btn btn-outline" onclick="exportBackup()">📥 导出备份</button>' +
-        '<button class="btn btn-outline" onclick="document.getElementById(\'importFileInput\').click()">📤 导入备份</button>' +
+        '<button class="btn btn-outline" onclick="showBackupManager()">💾 数据库备份</button>' +
+        '<button class="btn btn-outline" onclick="exportProjects()">📥 导出项目JSON</button>' +
+        '<button class="btn btn-outline" onclick="document.getElementById(\'importFileInput\').click()">📤 导入项目JSON</button>' +
         '<button class="btn btn-outline" onclick="openFolder(\'' + (window.electronAPI && window.electronAPI.isElectron ? 'electron-data' : 'data') + '\')">📂 打开数据目录</button>' +
       '</div>' +
     '</div>' +
@@ -1609,4 +1808,566 @@ async function requestNotifyPermission() {
   if (Notification.permission === 'default') {
     await Notification.requestPermission();
   }
+}
+
+// ==================== 部门快捷创建 ====================
+function applyDeptShortcut() {
+  const deptId = $('dlgDept') ? $('dlgDept').value : '';
+  const name = $('dlgDeptName') ? $('dlgDeptName').value.trim() : '';
+  const month = $('dlgDeptMonth') ? $('dlgDeptMonth').value.trim() : '';
+  const depts = settings.departments || [];
+  const dept = depts.find(function(d) { return d.id === deptId; });
+  if (!dept) {
+    if ($('dlgDeptMonth')) $('dlgDeptMonth').style.display = 'none';
+    if ($('dlgDeptPreview')) $('dlgDeptPreview').innerHTML = '';
+    return;
+  }
+  if ($('dlgDeptMonth')) $('dlgDeptMonth').style.display = dept.needMonth ? '' : 'none';
+  if (!name) {
+    if ($('dlgDeptPreview')) $('dlgDeptPreview').innerHTML = '<span style="color:#f59e0b">请输入项目名</span>';
+    return;
+  }
+  const localDir = dept.localRoot + '\\' + name;
+  let nasDir = dept.nasRoot;
+  if (dept.needMonth && month) nasDir += '\\' + month;
+  nasDir += '\\' + name;
+  if ($('dlgDeptPreview')) {
+    $('dlgDeptPreview').innerHTML = '📁 本地: ' + esc(localDir) + '<br>🌐 NAS: ' + esc(nasDir);
+  }
+  if ($('dlgName')) $('dlgName').value = name;
+  if ($('dlgLocal')) $('dlgLocal').value = localDir;
+  if ($('dlgNas')) $('dlgNas').value = nasDir;
+}
+
+// ==================== 项目置顶 ====================
+async function togglePin(idx) {
+  const p = projects[idx];
+  try {
+    await api.put('/api/projects/' + p.id + '/pin', { pinned: !p.pinned });
+    p.pinned = !p.pinned;
+    renderProjectList();
+    toast(p.pinned ? '📌 已置顶' : '已取消置顶', 'success');
+  } catch (e) { toast('操作失败: ' + e.message, 'error'); }
+}
+
+// ==================== 克隆项目 ====================
+async function cloneProject(idx) {
+  const newName = prompt('克隆项目，输入新项目名：', projects[idx].name + '（副本）');
+  if (!newName || !newName.trim()) return;
+  try {
+    const r = await api.post('/api/projects/' + projects[idx].id + '/clone', { newName: newName.trim() });
+    if (r.error) { toast('克隆失败: ' + r.error, 'error'); return; }
+    projects = await api.get('/api/projects');
+    renderProjectList();
+    const newIdx = projects.findIndex(function(p) { return p.id === r.project.id; });
+    if (newIdx >= 0) selectProject(newIdx);
+    toast('项目已克隆', 'success');
+  } catch (e) { toast('克隆失败: ' + e.message, 'error'); }
+}
+
+// ==================== NAS ↔ 本地对账 ====================
+async function showReconcile() {
+  if (sel < 0) { toast('请先选择项目', 'info'); return; }
+  const pid = projects[sel].id;
+  $('modalTitle').textContent = '🔍 NAS ↔ 本地对账 · ' + projects[sel].name;
+  $('modalBody').innerHTML = '<div style="padding:30px;text-align:center;color:#94a3b8">扫描中...</div>';
+  $('modalOverlay').style.display = 'flex';
+  try {
+    const kw = $('keywordInput').value || '项目归档资料';
+    const r = await api.get('/api/projects/' + pid + '/reconcile?keyword=' + encodeURIComponent(kw));
+    renderReconcile(r);
+  } catch (e) {
+    $('modalBody').innerHTML = '<div style="padding:20px;color:#ef4444">对账失败: ' + esc(e.message) + '</div>';
+  }
+}
+
+function renderReconcile(r) {
+  if (!r.found) {
+    $('modalBody').innerHTML = '<div style="padding:30px;text-align:center;color:#94a3b8">' + esc(r.message || '未找到关键词目录') + '</div>';
+    return;
+  }
+  function _list(title, items, color) {
+    if (!items.length) return '';
+    return '<div style="margin-bottom:12px"><div style="font-size:12px;color:' + color + ';margin-bottom:4px">' + title + ' (' + items.length + ')</div>'
+      + '<div style="max-height:120px;overflow-y:auto;border:1px solid rgba(255,255,255,.1);border-radius:6px;font-size:11px;font-family:Consolas,monospace">'
+      + items.map(function(i) { return '<div style="padding:3px 8px;border-bottom:1px solid rgba(255,255,255,.05);color:#cbd5e1">' + esc(i) + '</div>'; }).join('')
+      + '</div></div>';
+  }
+  const sizeItems = r.sizeMismatch.map(function(i) { return i.name + ' (本地' + (i.localSize/1048576).toFixed(1) + 'MB / NAS ' + (i.nasSize/1048576).toFixed(1) + 'MB)'; });
+  $('modalBody').innerHTML =
+    '<div style="margin-bottom:14px">'
+    + '<div style="font-size:12px;color:#94a3b8;margin-bottom:4px">关键词目录: ' + esc(r.keyword) + '</div>'
+    + '<div style="font-size:11px;color:#64748b;margin-bottom:10px">本地: ' + esc(r.localEpDir) + '<br>NAS: ' + esc(r.nasEpDir) + '</div>'
+    + '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">'
+    + '<div style="background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.3);border-radius:6px;padding:8px;text-align:center"><div style="font-size:20px;font-weight:700;color:#22c55e">' + r.matched + '</div><div style="font-size:10px;color:#94a3b8">一致</div></div>'
+    + '<div style="background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.3);border-radius:6px;padding:8px;text-align:center"><div style="font-size:20px;font-weight:700;color:#3b82f6">' + r.localOnly.length + '</div><div style="font-size:10px;color:#94a3b8">待交付</div></div>'
+    + '<div style="background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);border-radius:6px;padding:8px;text-align:center"><div style="font-size:20px;font-weight:700;color:#f59e0b">' + r.sizeMismatch.length + '</div><div style="font-size:10px;color:#94a3b8">大小不同</div></div>'
+    + '<div style="background:rgba(168,85,247,.1);border:1px solid rgba(168,85,247,.3);border-radius:6px;padding:8px;text-align:center"><div style="font-size:20px;font-weight:700;color:#a855f7">' + r.mtimeMismatch.length + '</div><div style="font-size:10px;color:#94a3b8">时间不同</div></div>'
+    + '</div></div>'
+    + _list('待交付（本地有 NAS 无）', r.localOnly, '#3b82f6')
+    + _list('大小不一致（需重新复制）', sizeItems, '#f59e0b')
+    + _list('mtime 不一致（增量同步会重传）', r.mtimeMismatch.map(function(i) { return i.name; }), '#a855f7')
+    + _list('NAS 多余（NAS 有本地无）', r.nasOnly, '#ef4444')
+    + '<div class="modal-btns"><button class="btn btn-outline" onclick="closeModal()">关闭</button></div>';
+}
+
+// ==================== 一键全部复制 ====================
+// 跳过勾选步骤，自动检测并复制全部待交付文件
+async function quickCopyAll() {
+  if (sel < 0) { toast('请先选择项目', 'info'); return; }
+  if (!confirm('将自动检测并复制全部待交付文件到 NAS，确认继续？')) return;
+  setStatus('正在检测待复制文件...');
+  try {
+    const kw = $('keywordInput').value || '项目归档资料';
+    const data = await api.get('/api/projects/' + projects[sel].id + '/pending?keyword=' + encodeURIComponent(kw));
+    const files = data.files || [];
+    if (!files.length) { toast('没有待交付文件', 'info'); setStatus('就绪'); return; }
+    addLog('⚡ 一键复制：检测到 ' + files.length + ' 个文件');
+    startProgress('一键复制 ' + files.length + ' 个文件', files.length);
+    const r = await api.post('/api/projects/' + projects[sel].id + '/copy', {
+      fileNames: files,
+      keyword: kw
+    });
+    await pollJob(r.jobId);
+    refreshDetail();
+  } catch (e) {
+    addLog('✗ 一键复制失败: ' + e.message);
+    finishProgress('error', e.message);
+  }
+}
+
+// ==================== 交付历史对比 ====================
+let _copyHistoryData = [];
+
+async function showCopyHistory() {
+  if (sel < 0) { toast('请先选择项目', 'info'); return; }
+  const pid = projects[sel].id;
+  $('modalTitle').textContent = '📊 交付历史 · ' + projects[sel].name;
+  $('modalBody').innerHTML = '<div style="padding:30px;text-align:center;color:#94a3b8">加载中...</div>';
+  $('modalOverlay').style.display = 'flex';
+  try {
+    const r = await api.get('/api/projects/' + pid + '/copy-history');
+    _copyHistoryData = r.history || [];
+    renderCopyHistory();
+  } catch (e) {
+    $('modalBody').innerHTML = '<div style="padding:20px;color:#ef4444">加载失败: ' + esc(e.message) + '</div>';
+  }
+}
+
+// ==================== 交付前质量检查 ====================
+async function runQualityCheck() {
+  if (sel < 0) { toast('请先选择项目', 'info'); return; }
+  const pid = projects[sel].id;
+  // 取待交付文件列表
+  const checked = getCheckedNames('pendingList');
+  let files = checked;
+  if (!files.length) {
+    // 没勾选就检查全部待交付文件
+    try {
+      const r = await api.get('/api/projects/' + pid + '/pending');
+      files = (r.files || []).map(function(f) { return f.name; });
+    } catch (e) { toast('获取文件列表失败', 'error'); return; }
+  }
+  if (!files.length) { toast('没有待检查的文件', 'info'); return; }
+
+  $('modalTitle').textContent = '🔍 质量检查 · ' + projects[sel].name;
+  $('modalBody').innerHTML = '<div style="padding:30px;text-align:center;color:#94a3b8">🔬 正在检查 ' + files.length + ' 个文件...<br><div style="margin-top:10px;font-size:11px">读取视频时长可能需要几秒</div></div>';
+  $('modalOverlay').style.display = 'flex';
+
+  try {
+    const r = await api.post('/api/projects/' + pid + '/quality-check', { fileNames: files });
+    renderQualityResult(r);
+  } catch (e) {
+    $('modalBody').innerHTML = '<div style="padding:30px;text-align:center;color:#ef4444">检查失败: ' + esc(e.message) + '</div>';
+  }
+}
+
+function renderQualityResult(data) {
+  const results = data.results || [];
+  const s = data.summary || {};
+  const canDeliver = data.summary && data.summary.canDeliver;
+
+  const summaryBg = canDeliver
+    ? 'linear-gradient(135deg,rgba(34,197,94,.1),rgba(34,197,94,.05))'
+    : 'linear-gradient(135deg,rgba(239,68,68,.1),rgba(245,158,11,.05))';
+  const summaryBorder = canDeliver ? 'rgba(34,197,94,.3)' : 'rgba(239,68,68,.3)';
+  const summaryIcon = canDeliver ? '✅' : '⚠️';
+  const summaryText = canDeliver ? '全部通过,可以交付' : '存在问题,请检查后再交付';
+
+  const summaryHtml =
+    '<div style="padding:14px;background:' + summaryBg + ';border:1px solid ' + summaryBorder + ';border-radius:10px;margin-bottom:14px">'
+    + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">'
+    + '<span style="font-size:20px">' + summaryIcon + '</span>'
+    + '<span style="font-size:14px;font-weight:600;color:#e2e8f0">' + summaryText + '</span></div>'
+    + '<div style="display:flex;gap:16px;font-size:12px">'
+    + '<span style="color:#22c55e">✓ ' + s.passed + '</span>'
+    + '<span style="color:#f59e0b">⚠ ' + s.warnings + '</span>'
+    + '<span style="color:#ef4444">✗ ' + s.errors + '</span>'
+    + '<span style="color:#94a3b8">共 ' + data.total + '</span></div></div>';
+
+  const listHtml = results.map(function(r) {
+    const statusIcon = !r.ok ? '❌' : (r.warnings.length > 0 ? '⚠️' : '✅');
+    const statusColor = !r.ok ? '#ef4444' : (r.warnings.length > 0 ? '#f59e0b' : '#22c55e');
+    const sizeStr = r.size > 1048576 ? (r.size/1048576).toFixed(1)+'MB' : (r.size/1024).toFixed(0)+'KB';
+    const durationStr = r.duration > 0 ? r.duration.toFixed(0)+'秒' : '-';
+    const resolution = r.resolution ? ' · ' + r.resolution : '';
+    return '<div style="padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.05);font-size:12px">'
+      + '<div style="display:flex;align-items:center;justify-content:space-between">'
+      + '<div style="flex:1;min-width:0"><span style="margin-right:6px">' + statusIcon + '</span><span style="color:#e2e8f0">' + esc(r.name) + '</span></div>'
+      + '<div style="font-size:10px;color:#64748b;white-space:nowrap">' + sizeStr + ' · ' + durationStr + resolution + '</div></div>'
+      + (r.errors.length > 0 ? '<div style="color:#ef4444;font-size:11px;margin-top:4px;padding-left:22px">错误: ' + r.errors.map(esc).join('; ') + '</div>' : '')
+      + (r.warnings.length > 0 ? '<div style="color:#f59e0b;font-size:11px;margin-top:4px;padding-left:22px">警告: ' + r.warnings.map(esc).join('; ') + '</div>' : '')
+      + '</div>';
+  }).join('');
+
+  $('modalBody').innerHTML =
+    '<div style="padding:8px 4px;max-height:70vh;overflow-y:auto">'
+    + summaryHtml
+    + '<div>' + listHtml + '</div>'
+    + '</div>'
+    + '<div class="modal-btns">'
+    + (canDeliver ? '<button class="btn btn-primary" onclick="closeModal();copyPending()">✅ 继续交付</button>' : '')
+    + '<button class="btn btn-outline" onclick="closeModal()">关闭</button></div>';
+}
+
+// ==================== 项目待办事项 ====================
+let _todoList = [];
+async function showTodos() {
+  if (sel < 0) { toast('请先选择项目', 'info'); return; }
+  const pid = projects[sel].id;
+  $('modalTitle').textContent = '✅ 待办事项 · ' + projects[sel].name;
+  $('modalBody').innerHTML = '<div style="padding:30px;text-align:center;color:#94a3b8">加载中...</div>';
+  $('modalOverlay').style.display = 'flex';
+  try {
+    const r = await api.get('/api/projects/' + pid + '/todos');
+    _todoList = r.todos || [];
+    renderTodos();
+  } catch (e) {
+    $('modalBody').innerHTML = '<div style="padding:30px;text-align:center;color:#ef4444">加载失败: ' + esc(e.message) + '</div>';
+  }
+}
+
+function renderTodos() {
+  const todos = _todoList;
+  const pending = todos.filter(function(t) { return !t.done; });
+  const done = todos.filter(function(t) { return t.done; });
+
+  const todoItems = todos.map(function(t) {
+    const checkIcon = t.done ? '☑️' : '⬜';
+    const textStyle = t.done ? 'color:#64748b;text-decoration:line-through' : 'color:#e2e8f0';
+    const priorityBadge = t.priority > 0 ? '<span style="color:#ef4444;font-size:10px;margin-right:4px">★</span>' : '';
+    return '<div style="display:flex;align-items:center;padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.05)" data-tid="' + t.id + '">'
+      + '<span style="cursor:pointer;font-size:16px;margin-right:8px" onclick="toggleTodo(\'' + t.id + '\',' + (t.done ? 0 : 1) + ')">' + checkIcon + '</span>'
+      + '<div style="flex:1;font-size:13px;' + textStyle + '">' + priorityBadge + esc(t.text) + '</div>'
+      + '<button onclick="deleteTodo(\'' + t.id + '\')" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:14px;padding:0 4px">×</button>'
+      + '</div>';
+  }).join('');
+
+  const summary = pending.length > 0
+    ? '<span style="color:#f59e0b">' + pending.length + ' 待办</span>'
+    : '<span style="color:#22c55e">✓ 全部完成</span>';
+
+  $('modalBody').innerHTML =
+    '<div style="padding:16px">'
+    + '<div style="display:flex;gap:8px;margin-bottom:16px">'
+    + '<input id="todoInput" type="text" placeholder="新增待办事项..." style="flex:1;padding:8px 12px;background:rgba(30,41,59,.6);border:1px solid rgba(255,255,255,.1);border-radius:6px;color:#e2e8f0;font-size:13px" onkeydown="if(event.key===\'Enter\')addTodo()">'
+    + '<button class="btn btn-sm btn-primary" onclick="addTodo()">+ 添加</button></div>'
+    + '<div style="margin-bottom:8px;font-size:12px">' + summary + (done.length ? ' · <span style="color:#94a3b8">' + done.length + ' 已完成</span>' : '') + '</div>'
+    + '<div style="max-height:400px;overflow-y:auto">' + (todoItems || '<div style="padding:30px;text-align:center;color:#94a3b8">暂无待办事项</div>') + '</div>'
+    + '</div>'
+    + '<div class="modal-btns"><button class="btn btn-outline" onclick="closeModal()">关闭</button></div>';
+
+  const input = document.getElementById('todoInput');
+  if (input) input.focus();
+}
+
+async function addTodo() {
+  if (sel < 0) return;
+  const pid = projects[sel].id;
+  const input = document.getElementById('todoInput');
+  const text = (input.value || '').trim();
+  if (!text) return;
+  try {
+    const r = await api.post('/api/projects/' + pid + '/todos', { text: text, priority: 0 });
+    if (r.success) {
+      _todoList.push(r.todo);
+      _todoList.sort(function(a, b) { return (a.done ? 1 : 0) - (b.done ? 1 : 0); });
+      renderTodos();
+    }
+  } catch (e) { toast('添加失败: ' + e.message, 'error'); }
+}
+
+async function toggleTodo(id, done) {
+  if (sel < 0) return;
+  const pid = projects[sel].id;
+  try {
+    await api.put('/api/projects/' + pid + '/todos/' + id, { done: !!done });
+    const t = _todoList.find(function(x) { return x.id === id; });
+    if (t) { t.done = !!done; t.completedAt = done ? new Date().toISOString() : null; }
+    _todoList.sort(function(a, b) { return (a.done ? 1 : 0) - (b.done ? 1 : 0); });
+    renderTodos();
+  } catch (e) { toast('更新失败: ' + e.message, 'error'); }
+}
+
+async function deleteTodo(id) {
+  if (sel < 0) return;
+  const pid = projects[sel].id;
+  try {
+    await api.del('/api/projects/' + pid + '/todos/' + id);
+    _todoList = _todoList.filter(function(x) { return x.id !== id; });
+    renderTodos();
+  } catch (e) { toast('删除失败: ' + e.message, 'error'); }
+}
+
+// ==================== 看板视图 ====================
+let _kanbanVisible = false;
+function showKanban() {
+  let panel = document.getElementById('kanbanPanel');
+  if (!panel) {
+    // 动态创建看板面板
+    const div = document.createElement('div');
+    div.id = 'kanbanPanel';
+    div.style.cssText = 'position:fixed;top:50px;left:0;right:0;bottom:0;background:rgba(15,23,42,.97);z-index:100;display:none;padding:16px;overflow-y:auto';
+    document.body.appendChild(div);
+    panel = document.getElementById('kanbanPanel');
+  }
+  if (_kanbanVisible) {
+    panel.style.display = 'none';
+    _kanbanVisible = false;
+    return;
+  }
+  _kanbanVisible = true;
+  panel.style.display = 'block';
+  renderKanban();
+}
+
+function renderKanban() {
+  const panel = document.getElementById('kanbanPanel');
+  const search = ($('searchInput') ? $('searchInput').value : '').toLowerCase();
+  const groups = { editing: [], modifying: [], done: [] };
+  for (let i = 0; i < projects.length; i++) {
+    const p = projects[i];
+    if (search && p.name.toLowerCase().indexOf(search) < 0) continue;
+    const s = (p.status && groups[p.status] !== undefined) ? p.status : 'editing';
+    groups[s].push({ p: p, idx: i });
+  }
+
+  const columns = [
+    { key: 'editing', label: '🔵 剪辑中', color: '#3b82f6', bg: 'rgba(59,130,246,.06)' },
+    { key: 'modifying', label: '🟠 修改中', color: '#f59e0b', bg: 'rgba(245,158,11,.06)' },
+    { key: 'done', label: '✅ 已完成', color: '#22c55e', bg: 'rgba(34,197,94,.06)' },
+  ];
+
+  panel.innerHTML =
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">'
+    + '<h2 style="margin:0;font-size:18px;color:#e2e8f0">🗂️ 看板视图 <span style="font-size:12px;color:#94a3b8;font-weight:400">拖拽卡片可切换状态</span></h2>'
+    + '<button onclick="showKanban()" style="background:none;border:1px solid #475569;color:#94a3b8;width:28px;height:28px;border-radius:6px;cursor:pointer;font-size:16px">×</button></div>'
+    + '<div style="display:flex;gap:12px;min-height:400px">'
+    + columns.map(function(col) {
+        const cards = groups[col.key];
+        const cardsHtml = cards.map(function(item) {
+          const p = item.p;
+          const pinIcon = p.pinned ? '📌 ' : '';
+          const targetInfo = p.episodeTarget ? '目标 ' + p.episodeTarget + ' 集' : '';
+          const assigns = (p.episodeAssignments || []).slice(0, 2).map(function(a) { return a.name; }).join('、');
+          return '<div draggable="true" data-pid="' + p.id + '" data-idx="' + item.idx + '" '
+            + 'style="background:rgba(30,41,59,.7);border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:10px;margin-bottom:8px;cursor:move;transition:all .15s" '
+            + 'onmouseover="this.style.borderColor=\'' + col.color + '\'" onmouseout="this.style.borderColor=\'rgba(255,255,255,.08)\'" '
+            + 'onclick="kanbanCardClick(' + item.idx + ')">'
+            + '<div style="font-size:13px;color:#e2e8f0;font-weight:500;margin-bottom:4px">' + pinIcon + esc(p.name) + '</div>'
+            + (targetInfo ? '<div style="font-size:11px;color:#94a3b8">' + targetInfo + '</div>' : '')
+            + (assigns ? '<div style="font-size:11px;color:#64748b;margin-top:2px">👥 ' + esc(assigns) + '</div>' : '')
+            + '</div>';
+        }).join('');
+        return '<div data-col="' + col.key + '" '
+          + 'style="flex:1;background:' + col.bg + ';border:1px solid ' + col.color + '20;border-radius:10px;padding:10px;min-height:400px;transition:background .2s" '
+          + 'ondragover="event.preventDefault();this.style.background=\'' + col.color + '15\'" '
+          + 'ondragleave="this.style.background=\'' + col.bg + '\'" '
+          + 'ondrop="kanbanDrop(event,\'' + col.key + '\')">'
+          + '<div style="font-size:13px;font-weight:600;color:' + col.color + ';margin-bottom:10px;padding:4px 8px">'
+          + col.label + ' <span style="color:#94a3b8;font-weight:400">(' + cards.length + ')</span></div>'
+          + cardsHtml
+          + '</div>';
+      }).join('')
+    + '</div>';
+
+  // 绑定 dragstart
+  panel.querySelectorAll('[draggable=true]').forEach(function(card) {
+    card.addEventListener('dragstart', function(e) {
+      e.dataTransfer.setData('text/plain', card.dataset.pid);
+      card.style.opacity = '0.5';
+    });
+    card.addEventListener('dragend', function() { card.style.opacity = '1'; });
+  });
+}
+
+function kanbanCardClick(idx) {
+  showKanban(); // 关闭看板
+  selectProject(idx);
+}
+
+async function kanbanDrop(e, newStatus) {
+  e.preventDefault();
+  const pid = e.dataTransfer.getData('text/plain');
+  if (!pid) return;
+  const idx = projects.findIndex(function(p) { return p.id === pid; });
+  if (idx < 0) return;
+  const p = projects[idx];
+  if ((p.status || 'editing') === newStatus) { renderKanban(); return; }
+  try {
+    const r = await api.put('/api/projects/' + pid + '/status', { status: newStatus });
+    if (r && r.error) { toast('切换失败: ' + r.error, 'error'); renderKanban(); return; }
+    projects[idx].status = newStatus;
+    toast(p.name + ' → ' + (newStatus === 'done' ? '已完成' : newStatus === 'modifying' ? '修改中' : '剪辑中'), 'success');
+    renderKanban();
+    renderProjectList();
+  } catch (e) { toast('切换失败: ' + e.message, 'error'); renderKanban(); }
+}
+
+// ==================== 项目交付时间轴 ====================
+async function showTimeline() {
+  if (sel < 0) { toast('请先选择项目', 'info'); return; }
+  const pid = projects[sel].id;
+  const pname = projects[sel].name;
+  $('modalTitle').textContent = '🕐 时间轴 · ' + pname;
+  $('modalBody').innerHTML = '<div style="padding:30px;text-align:center;color:#94a3b8">加载中...</div>';
+  $('modalOverlay').style.display = 'flex';
+  try {
+    const r = await api.get('/api/projects/' + pid + '/timeline');
+    renderTimeline(r);
+  } catch (e) {
+    $('modalBody').innerHTML = '<div style="padding:30px;text-align:center;color:#ef4444">加载失败: ' + esc(e.message) + '</div>';
+  }
+}
+
+function renderTimeline(data) {
+  const events = data.events || [];
+  const s = data.summary || {};
+  if (!events.length) {
+    $('modalBody').innerHTML = '<div style="padding:40px;text-align:center;color:#94a3b8">暂无时间轴记录</div>';
+    return;
+  }
+  const fmtDate = function(t) {
+    const d = new Date(t);
+    return d.toLocaleDateString('zh-CN') + ' ' + d.toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit'});
+  };
+  const fmtDuration = function(ms) {
+    if (!ms) return '0';
+    const days = Math.floor(ms/86400000);
+    const hrs = Math.floor((ms%86400000)/3600000);
+    if (days > 0) return days + '天' + hrs + '小时';
+    if (hrs > 0) return hrs + '小时';
+    const mins = Math.floor((ms%3600000)/60000);
+    return mins + '分钟';
+  };
+
+  const summaryHtml =
+    '<div style="display:flex;gap:12px;flex-wrap:wrap;padding:14px;background:linear-gradient(135deg,rgba(59,130,246,.08),rgba(139,92,246,.08));border:1px solid rgba(59,130,246,.2);border-radius:10px;margin-bottom:18px">'
+    + '<div style="flex:1;min-width:120px"><div style="font-size:10px;color:#94a3b8">总事件</div><div style="font-size:18px;font-weight:600;color:#e2e8f0">' + s.totalEvents + '</div></div>'
+    + '<div style="flex:1;min-width:120px"><div style="font-size:10px;color:#94a3b8">交付次数</div><div style="font-size:18px;font-weight:600;color:#22c55e">' + s.totalDeliveries + '</div></div>'
+    + '<div style="flex:1;min-width:120px"><div style="font-size:10px;color:#94a3b8">成功/失败</div><div style="font-size:14px;font-weight:600;color:#e2e8f0"><span style="color:#22c55e">' + s.totalOk + '</span> / <span style="color:#ef4444">' + s.totalFail + '</span></div></div>'
+    + '<div style="flex:1;min-width:120px"><div style="font-size:10px;color:#94a3b8">总耗时</div><div style="font-size:14px;font-weight:600;color:#f59e0b">' + fmtDuration(s.duration) + '</div></div>'
+    + '</div>';
+
+  const timelineHtml = events.map(function(ev, i) {
+    const isLast = i === events.length - 1;
+    return '<div style="display:flex;position:relative;padding-bottom:18px">'
+      + '<div style="display:flex;flex-direction:column;align-items:center;width:36px;flex-shrink:0">'
+      + '<div style="width:28px;height:28px;border-radius:50%;background:' + ev.color + '20;border:2px solid ' + ev.color + ';display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;z-index:1">' + ev.icon + '</div>'
+      + (isLast ? '' : '<div style="width:2px;flex:1;background:linear-gradient(to bottom,' + ev.color + '60,transparent);margin-top:2px"></div>')
+      + '</div>'
+      + '<div style="flex:1;padding-left:10px">'
+      + '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">'
+      + '<span style="font-size:13px;font-weight:600;color:#e2e8f0">' + esc(ev.title) + '</span>'
+      + '<span style="font-size:10px;color:#64748b;white-space:nowrap">' + fmtDate(ev.time) + '</span>'
+      + '</div>'
+      + (ev.detail ? '<div style="font-size:11px;color:#94a3b8;margin-bottom:4px">' + esc(ev.detail) + '</div>' : '')
+      + (ev.ok !== undefined ? '<div style="font-size:11px"><span style="color:#22c55e">✓ ' + ev.ok + ' 成功</span>' + (ev.fail > 0 ? ' <span style="color:#ef4444;margin-left:8px">✗ ' + ev.fail + ' 失败</span>' : '') + '</div>' : '')
+      + (ev.nasDir ? '<div style="font-size:10px;color:#64748b;margin-top:2px;word-break:break-all">📁 ' + esc(ev.nasDir) + '</div>' : '')
+      + '</div></div>';
+  }).join('');
+
+  $('modalBody').innerHTML =
+    '<div style="padding:8px 4px;max-height:70vh;overflow-y:auto">'
+    + summaryHtml
+    + '<div>' + timelineHtml + '</div>'
+    + '</div>'
+    + '<div class="modal-btns"><button class="btn btn-outline" onclick="closeModal()">关闭</button></div>';
+}
+
+function renderCopyHistory() {
+  if (!_copyHistoryData.length) {
+    $('modalBody').innerHTML = '<div style="padding:30px;text-align:center;color:#94a3b8">暂无交付历史记录</div>';
+    return;
+  }
+  // 选项下拉
+  const opts = _copyHistoryData.map((h, i) =>
+    '<option value="' + i + '">' + esc(h.createdAt) + ' · ' + esc(h.jobType) + ' · ' + h.fileCount + ' 文件</option>'
+  ).join('');
+  // 历史列表
+  const listHtml = _copyHistoryData.map(h => {
+    const filesPreview = (h.files || []).slice(0, 5).join(', ') + ((h.files || []).length > 5 ? ' 等 ' + h.files.length + ' 个' : '');
+    return '<div style="padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.06);font-size:12px">'
+      + '<div style="display:flex;justify-content:space-between;align-items:center">'
+      + '<span style="color:#e2e8f0">' + esc(h.createdAt) + '</span>'
+      + (h.rolledBack ? '<span style="color:#ef4444;font-size:10px;border:1px solid #ef4444;padding:1px 5px;border-radius:3px">已回滚</span>' : '')
+      + '</div>'
+      + '<div style="color:#94a3b8;margin-top:3px">' + esc(h.jobType) + ' · ' + h.fileCount + ' 文件</div>'
+      + (filesPreview ? '<div style="color:#64748b;font-size:11px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + escAttr(filesPreview) + '">' + esc(filesPreview) + '</div>' : '')
+      + '</div>';
+  }).join('');
+
+  $('modalBody').innerHTML =
+    '<div style="margin-bottom:14px;padding:12px;background:rgba(59,130,246,.06);border:1px solid rgba(59,130,246,.2);border-radius:8px">'
+    + '<div style="font-size:12px;color:#cbd5e1;margin-bottom:8px">🔍 选择两次交付进行对比</div>'
+    + '<div style="display:flex;gap:8px;align-items:center">'
+    + '<select id="histA" style="flex:1;background:#1e293b;border:1px solid #475569;color:#e2e8f0;padding:6px 8px;border-radius:5px;font-size:12px">' + opts + '</select>'
+    + '<span style="color:#94a3b8;font-size:11px">vs</span>'
+    + '<select id="histB" style="flex:1;background:#1e293b;border:1px solid #475569;color:#e2e8f0;padding:6px 8px;border-radius:5px;font-size:12px">' + opts + '</select>'
+    + '<button class="btn btn-sm btn-primary" onclick="compareCopyHistory()">对比</button>'
+    + '</div>'
+    + '<div id="histCompareResult" style="margin-top:10px"></div>'
+    + '</div>'
+    + '<div style="font-size:12px;color:#94a3b8;margin-bottom:6px">📋 历史记录（' + _copyHistoryData.length + ' 条）</div>'
+    + '<div style="max-height:280px;overflow-y:auto">' + listHtml + '</div>';
+}
+
+function compareCopyHistory() {
+  if (!_copyHistoryData.length) return;
+  const aIdx = parseInt(document.getElementById('histA').value);
+  const bIdx = parseInt(document.getElementById('histB').value);
+  const box = document.getElementById('histCompareResult');
+  if (isNaN(aIdx) || isNaN(bIdx)) { box.innerHTML = '<div style="color:#f59e0b;font-size:11px">请选择两次交付</div>'; return; }
+  if (aIdx === bIdx) { box.innerHTML = '<div style="color:#f59e0b;font-size:11px">请选择两次不同的交付</div>'; return; }
+  const opA = _copyHistoryData[aIdx];
+  const opB = _copyHistoryData[bIdx];
+  const setA = new Set(opA.files || []);
+  const setB = new Set(opB.files || []);
+  const added = (opB.files || []).filter(f => !setA.has(f));
+  const removed = (opA.files || []).filter(f => !setB.has(f));
+  const common = (opA.files || []).filter(f => setB.has(f));
+  // 较早 vs 较晚：用时间顺序展示
+  const earlier = opA.createdAt < opB.createdAt ? opA : opB;
+  const later = opA.createdAt < opB.createdAt ? opB : opA;
+  const earlierSet = new Set(earlier.files || []);
+  const laterSet = new Set(later.files || []);
+  const realAdded = (later.files || []).filter(f => !earlierSet.has(f));
+  const realRemoved = (earlier.files || []).filter(f => !laterSet.has(f));
+
+  function fileList(arr, color) {
+    if (!arr.length) return '<div style="color:#64748b;font-size:11px;padding:4px 0">无</div>';
+    return '<div style="max-height:100px;overflow-y:auto;font-size:11px;font-family:Consolas,monospace">' + arr.map(f => '<div style="color:' + color + ';padding:1px 0">' + esc(f) + '</div>').join('') + '</div>';
+  }
+
+  box.innerHTML =
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px">'
+    + '<div style="background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.2);border-radius:6px;padding:8px">'
+    + '<div style="font-size:11px;color:#22c55e;margin-bottom:4px">➕ 新增（' + realAdded.length + '）</div>'
+    + fileList(realAdded, '#22c55e') + '</div>'
+    + '<div style="background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);border-radius:6px;padding:8px">'
+    + '<div style="font-size:11px;color:#ef4444;margin-bottom:4px">➖ 消失（' + realRemoved.length + '）</div>'
+    + fileList(realRemoved, '#ef4444') + '</div>'
+    + '</div>'
+    + '<div style="font-size:11px;color:#94a3b8;margin-top:8px">较早：' + esc(earlier.createdAt) + ' (' + earlier.fileCount + ' 文件) → 较晚：' + esc(later.createdAt) + ' (' + later.fileCount + ' 文件)</div>'
+    + '<div style="font-size:11px;color:#64748b;margin-top:2px">共同文件：' + common.length + ' 个</div>';
 }

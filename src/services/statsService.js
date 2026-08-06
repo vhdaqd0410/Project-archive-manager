@@ -14,7 +14,7 @@ function compute(projects, deliveryLogs) {
   cacheTime = now;
 
   // 状态分布
-  const statusDist = { editing: 0, modifying: 0, done: 0 };
+  const statusDist = { editing: 0, initial: 0, modifying: 0, '000': 0, done: 0, archive: 0 };
   for (const p of projects) {
     if (statusDist[p.status] !== undefined) statusDist[p.status]++;
   }
@@ -56,16 +56,22 @@ function compute(projects, deliveryLogs) {
     summary: {
       total: projects.length,
       editing: statusDist.editing,
+      initial: statusDist.initial,
       modifying: statusDist.modifying,
+      '000': statusDist['000'],
       done: statusDist.done,
+      archive: statusDist.archive,
       totalEpisodes,
       todayDelivery: Object.values(dailyDelivery).filter(d => d.date === new Date().toISOString().slice(0, 10))
         .reduce((s, d) => s + d.ok, 0),
     },
     statusDistribution: [
       { label: '剪辑中', value: statusDist.editing, color: '#3b82f6' },
+      { label: '初版交付', value: statusDist.initial, color: '#06b6d4' },
       { label: '修改中', value: statusDist.modifying, color: '#f59e0b' },
+      { label: '000交付', value: statusDist['000'], color: '#a855f7' },
       { label: '已完成', value: statusDist.done, color: '#22c55e' },
+      { label: '归档', value: statusDist.archive, color: '#64748b' },
     ],
     episodeProgress: progress,
     deliveryTrend: Object.values(dailyDelivery).sort((a, b) => a.date.localeCompare(b.date)),

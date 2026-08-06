@@ -9,6 +9,7 @@ const ALLOWED_RECEIVE_CHANNELS = [
   'menu:import-backup',
   'drop:import-folder',
   'fs:changed',
+  'notification:click',
 ];
 
 const ALLOWED_SEND_CHANNELS = [
@@ -17,6 +18,7 @@ const ALLOWED_SEND_CHANNELS = [
   'stop-all-watch',
   'global-show-window',
   'register-global-shortcut',
+  'notification-unread',
 ];
 
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -45,8 +47,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.send(channel, data);
     }
   },
-  // ── 新增：原生桌面通知 ──
-  showNotification: (title, body) => ipcRenderer.invoke('show-notification', { title, body }),
+  // ── 新增：原生桌面通知（支持点击动作派发）──
+  showNotification: (title, body, options) => ipcRenderer.invoke('show-notification', {
+    title, body,
+    action: options && options.action || undefined,
+    payload: options && options.payload || undefined,
+  }),
   // ── 新增：应用设置 ──
   getAppSettings: () => ipcRenderer.invoke('get-settings'),
   setAutoStart: (enabled) => ipcRenderer.invoke('set-auto-start', enabled),

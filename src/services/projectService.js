@@ -88,6 +88,40 @@ function saveProjects(projects) {
   return serializedWrite(() => writeJSON(projectsFile, snapshot));
 }
 
+// 单项目增量保存：避免每次状态切换都全表 DELETE+INSERT
+// 性能：O(1) 数据库操作；并发安全：仅更新对应行
+function saveProject(project) {
+  const database = getDB();
+  if (database.isAvailable()) {
+    try {
+      database.upsertProject(project);
+      return Promise.resolve();
+    } catch (e) {
+      log.error('SQLite 单项目保存失败，回退到 JSON 全量:', e.message);
+    }
+  }
+  // fallback to JSON：load -> upsert -> write
+  const all = loadProjects();
+  const idx = all.findIndex(p => p.id === project.id);
+  if (idx >= 0) all[idx] = project; else all.push(project);
+  return serializedWrite(() => writeJSON(projectsFile, all));
+}
+
+// 单项目删除
+function removeProject(id) {
+  const database = getDB();
+  if (database.isAvailable()) {
+    try {
+      database.deleteProject(id);
+      return Promise.resolve();
+    } catch (e) {
+      log.error('SQLite 删除失败，回退到 JSON:', e.message);
+    }
+  }
+  const all = loadProjects().filter(p => p.id !== id);
+  return serializedWrite(() => writeJSON(projectsFile, all));
+}
+
 function loadSettings() {
   const database = getDB();
   if (database.isAvailable()) {
@@ -153,6 +187,7 @@ function addDeliveryLog(projectName, projectId, action, detail, ok, fail) {
 }
 
 module.exports = {
-  loadProjects, saveProjects, loadSettings, saveSettings,
+  loadProjects, saveProjects, saveProject, removeProject,
+  loadSettings, saveSettings,
   loadDeliveryLog, addDeliveryLog,
 };

@@ -106,6 +106,17 @@ function createTables() {
       detail TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS project_todos (
+      id TEXT PRIMARY KEY,
+      projectId TEXT NOT NULL,
+      text TEXT NOT NULL,
+      done INTEGER DEFAULT 0,
+      priority INTEGER DEFAULT 0,
+      createdAt TEXT DEFAULT (datetime('now')),
+      completedAt TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_todos_project ON project_todos(projectId);
+
     CREATE TABLE IF NOT EXISTS hooks (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -232,6 +243,9 @@ function createTables() {
     CREATE INDEX IF NOT EXISTS idx_copy_operations_project ON copy_operations(projectId);
     CREATE INDEX IF NOT EXISTS idx_thumbnails_project ON thumbnails(projectId);
   `);
+
+  // ── Migration: 增量加列（兼容已有数据库）──
+  try { db.prepare('ALTER TABLE projects ADD COLUMN pinned INTEGER DEFAULT 0').run(); } catch (e) { /* 列已存在 */ }
 }
 
 function migrateFromJSON() {
@@ -311,6 +325,7 @@ function getProjects() {
   const rows = db.prepare('SELECT * FROM projects ORDER BY createdAt DESC').all();
   return rows.map(r => ({
     ...r,
+    pinned: !!r.pinned,
     episodeAssignments: JSON.parse(r.episodeAssignments || '[]'),
   }));
 }
@@ -318,8 +333,8 @@ function getProjects() {
 function upsertProject(p) {
   if (!available) return;
   db.prepare(`INSERT OR REPLACE INTO projects
-    (id, name, localDir, nasDir, status, memo, episodeTarget, episodeAssignments, createdAt, updatedAt)
-    VALUES (@id, @name, @localDir, @nasDir, @status, @memo, @episodeTarget, @episodeAssignments, @createdAt, @updatedAt)`)
+    (id, name, localDir, nasDir, status, memo, episodeTarget, episodeAssignments, createdAt, updatedAt, pinned)
+    VALUES (@id, @name, @localDir, @nasDir, @status, @memo, @episodeTarget, @episodeAssignments, @createdAt, @updatedAt, @pinned)`)
     .run({
       id: p.id, name: p.name, localDir: p.localDir || '', nasDir: p.nasDir || '',
       status: p.status || 'editing', memo: p.memo || '',
@@ -327,6 +342,7 @@ function upsertProject(p) {
       episodeAssignments: JSON.stringify(p.episodeAssignments || []),
       createdAt: p.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
+      pinned: p.pinned ? 1 : 0,
     });
 }
 
@@ -335,6 +351,7 @@ function deleteProject(id) {
   db.prepare('DELETE FROM projects WHERE id = ?').run(id);
 }
 
+// 全量同步：仅用于批量导入/恢复备份等需要重置整表的场景
 function syncProjects(projects) {
   if (!available) return;
   const tx = db.transaction((items) => {
@@ -369,6 +386,18 @@ function getAllSettings() {
 function getDeliveryLogs(limit) {
   if (!available) return null;
   return db.prepare('SELECT * FROM delivery_logs ORDER BY time DESC LIMIT ?').all(limit || 500);
+}
+
+function getDeliveryLogsByProject(projectId, limit) {
+  if (!available) return [];
+  return db.prepare('SELECT * FROM delivery_logs WHERE projectId = ? ORDER BY time ASC LIMIT ?').all(projectId, limit || 200);
+}
+
+function getAuditLogsByProject(projectId, limit) {
+  if (!available) return [];
+  // audit_logs.target 可能存项目 id 或 name
+  return db.prepare(`SELECT * FROM audit_logs WHERE target = ? OR target LIKE ? ORDER BY time ASC LIMIT ?`)
+    .all(projectId, '%' + projectId + '%', limit || 100);
 }
 
 function addDeliveryLog(entry) {
@@ -434,6 +463,34 @@ function addCopyOperation(op) {
   db.prepare(`INSERT INTO copy_operations (id, projectId, jobType, files, nasDir, createdAt, rolledBack)
     VALUES (@id, @projectId, @jobType, @files, @nasDir, @createdAt, 0)`).run(op);
 }
+
+// ── Helper: project todos ──
+function getProjectTodos(projectId) {
+  if (!available) return [];
+  return db.prepare('SELECT * FROM project_todos WHERE projectId = ? ORDER BY done ASC, priority DESC, createdAt ASC').all(projectId);
+}
+function addProjectTodo(todo) {
+  if (!available) return;
+  db.prepare(`INSERT INTO project_todos (id, projectId, text, done, priority, createdAt)
+    VALUES (@id, @projectId, @text, 0, @priority, @createdAt)`).run(todo);
+}
+function updateProjectTodo(id, updates) {
+  if (!available) return;
+  if (updates.done !== undefined) {
+    db.prepare('UPDATE project_todos SET done = ?, completedAt = ? WHERE id = ?')
+      .run(updates.done ? 1 : 0, updates.done ? new Date().toISOString() : null, id);
+  }
+  if (updates.text !== undefined) {
+    db.prepare('UPDATE project_todos SET text = ? WHERE id = ?').run(updates.text, id);
+  }
+  if (updates.priority !== undefined) {
+    db.prepare('UPDATE project_todos SET priority = ? WHERE id = ?').run(updates.priority, id);
+  }
+}
+function deleteProjectTodo(id) {
+  if (!available) return;
+  db.prepare('DELETE FROM project_todos WHERE id = ?').run(id);
+}
 function getCopyOperations(projectId, limit) {
   if (!available) return [];
   return db.prepare('SELECT * FROM copy_operations WHERE projectId = ? ORDER BY createdAt DESC LIMIT ?').all(projectId, limit || 20);
@@ -484,10 +541,13 @@ module.exports = {
   setSetting,
   getAllSettings,
   getDeliveryLogs,
+  getDeliveryLogsByProject,
+  getAuditLogsByProject,
   addDeliveryLog,
   getTags, addTag, deleteTag, getProjectTags, setProjectTags,
   getTemplates, getTemplate, saveTemplate, deleteTemplate,
   addCopyOperation, getCopyOperations, getCopyOperation, markRolledBack,
-  getThumbnail, addThumbnail,
+  getProjectTodos, addProjectTodo, updateProjectTodo, deleteProjectTodo,
   getAuditLogs,
+  getThumbnail, addThumbnail,
 };

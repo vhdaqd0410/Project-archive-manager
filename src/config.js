@@ -21,6 +21,21 @@ module.exports = {
     maxLogEntries: 500,
     maxRunningJobs: 5,
     maxKeptDoneJobs: 5,
+    // 部门预设：新建项目时选择部门可自动拼接本地/NAS路径
+    departments: [
+      { id: 'dept1', name: 'AI漫剧一部', localRoot: 'O:\\AI漫剧剪辑一组', nasRoot: 'N:\\AI漫剧一部中转\\AI漫剧一部海外', needMonth: false },
+      { id: 'dept2', name: 'AI漫剧二部', localRoot: 'O:\\AI漫剧剪辑一组', nasRoot: 'N:\\AI漫剧二部中转', needMonth: false },
+      { id: 'dept3', name: 'AI漫剧九部', localRoot: 'O:\\AI漫剧剪辑一组', nasRoot: 'N:\\AI漫剧九部中转\\海外', needMonth: true },
+    ],
+  },
+
+  // ── 项目停滞监控 ──
+  // 定时扫描"剪辑中"项目，localDir 关键词目录超过阈值未更新则提醒
+  stallWatcher: {
+    enabled: true,
+    intervalMs: 60 * 60 * 1000,           // 扫描间隔（1 小时）
+    stallThresholdMs: 3 * 24 * 60 * 60 * 1000, // 3天未更新视为停滞
+    cooldownMs: 24 * 60 * 60 * 1000,       // 同一项目两次提醒最小间隔（24 小时）
   },
 
   // ── 文件操作 ──
@@ -38,13 +53,22 @@ module.exports = {
   ]),
 
   // ── 项目有效状态 ──
-  validStatuses: ['editing', 'modifying', 'done'],
+  validStatuses: ['editing', 'initial', 'modifying', 'done', '000', 'archive'],
 
   // ── 交付关键词 ──
   deliveryKeywords: {
     normal: '项目归档资料',
     modify: '上映单集版',
     archive: '000交付',
+  },
+
+  // ── 交付监控 (Delivery Watcher) ──
+  // 定时扫描"剪辑中"项目，达到目标集数时通过桌面通知提醒交付
+  deliveryWatcher: {
+    enabled: true,
+    intervalMs: 5 * 60 * 1000,        // 扫描间隔（5 分钟）
+    cooldownMs: 30 * 60 * 1000,       // 同一项目两次提醒的最小间隔（30 分钟）
+    // 复用 fileOps 中的 videoExtensions 集合
   },
 
   // ── 日志 ──
