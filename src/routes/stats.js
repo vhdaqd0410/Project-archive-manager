@@ -232,4 +232,142 @@ router.get('/editor-view', (req, res) => {
   res.json({ editors, totalEditors: editors.length });
 });
 
+// 项目交付日历视图
+// 返回每个项目的预期交付日期（initialDeliveryDate 字段）+ 实际交付历史
+// 项目可设置 expectedDeliveryDate；初版交付日期由 delivery_logs 推断
+router.get('/calendar', (req, res) => {
+  const projects = shared.projects || [];
+  const logs = projectService.loadDeliveryLog(10000) || [];
+
+  // 每个项目最早的"文件复制"记录作为初版交付日期
+  const firstDeliveryByPid = {};
+  for (const l of logs) {
+    if (l.action !== '文件复制' || !l.projectId) continue;
+    const prev = firstDeliveryByPid[l.projectId];
+    if (!prev || l.time < prev.time) firstDeliveryByPid[l.projectId] = l.time;
+  }
+
+  // 按日期聚合所有交付事件
+  const eventsByDate = {};
+  for (const l of logs) {
+    const day = (l.time || '').slice(0, 10);
+    if (!day) continue;
+    if (!eventsByDate[day]) eventsByDate[day] = [];
+    eventsByDate[day].push({
+      projectId: l.projectId,
+      projectName: l.projectName,
+      action: l.action,
+      ok: l.ok || 0,
+      fail: l.fail || 0,
+    });
+  }
+
+  // 构建项目日历项：预期交付日期 + 实际交付日期
+  const items = projects.map(p => {
+    const firstDelivery = firstDeliveryByPid[p.id] || null;
+    return {
+      id: p.id,
+      name: p.name,
+      status: p.status,
+      expectedDate: p.expectedDeliveryDate || null,  // 可选字段
+      firstDeliveryDate: firstDelivery,
+      episodeTarget: p.episodeTarget || 0,
+    };
+  });
+
+  res.json({
+    items,
+    events: eventsByDate,
+    today: new Date().toISOString().slice(0, 10),
+  });
+});
+
+// 数据可视化大屏聚合接口
+// 一次性返回大屏所需全部数据，减少请求次数
+router.get('/screen', (req, res) => {
+  const projects = shared.projects || [];
+  const logs = projectService.loadDeliveryLog(10000) || [];
+  const now = new Date();
+  const today = now.toISOString().slice(0, 10);
+
+  // 1) 状态分布
+  const statusDist = { editing: 0, modifying: 0, done: 0 };
+  for (const p of projects) {
+    if (statusDist[p.status] !== undefined) statusDist[p.status]++;
+  }
+
+  // 2) 最近 14 天交付趋势
+  const dayMs = 24 * 60 * 60 * 1000;
+  const trend = [];
+  for (let i = 13; i >= 0; i--) {
+    const day = new Date(now - i * dayMs).toISOString().slice(0, 10);
+    let ok = 0, fail = 0;
+    for (const l of logs) {
+      if ((l.time || '').slice(0, 10) === day) { ok += (l.ok || 0); fail += (l.fail || 0); }
+    }
+    trend.push({ date: day, ok, fail });
+  }
+
+  // 3) 剪辑师产出（按交付文件数排序）
+  const editorMap = {};
+  for (const p of projects) {
+    for (const a of (p.episodeAssignments || [])) {
+      const name = (a.name || '').trim();
+      if (!name) continue;
+      if (!editorMap[name]) editorMap[name] = { name, projects: new Set(), episodes: 0 };
+      editorMap[name].projects.add(p.name);
+      const range = (a.end || 0) - (a.start || 0) + 1;
+      if (range > 0) editorMap[name].episodes += range;
+    }
+  }
+  const editors = Object.values(editorMap).map(e => ({
+    name: e.name, projectCount: e.projects.size, episodes: e.episodes,
+  })).sort((a, b) => b.episodes - a.episodes).slice(0, 10);
+
+  // 4) 今日交付明细
+  const todayDeliveries = logs.filter(l => (l.time || '').slice(0, 10) === today);
+
+  // 5) 按月份交付项目数（最近 6 个月）
+  const monthMs = 30 * dayMs;
+  const monthly = [];
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(now - i * monthMs);
+    const ym = d.toISOString().slice(0, 7);
+    const projSet = new Set();
+    let files = 0;
+    for (const l of logs) {
+      if ((l.time || '').slice(0, 7) === ym) {
+        if (l.projectId) projSet.add(l.projectId);
+        files += (l.ok || 0);
+      }
+    }
+    monthly.push({ month: ym, projectCount: projSet.size, files });
+  }
+
+  // 6) 总览数据
+  const totalFiles = logs.reduce((s, l) => s + (l.ok || 0), 0);
+
+  res.json({
+    summary: {
+      totalProjects: projects.length,
+      editing: statusDist.editing,
+      modifying: statusDist.modifying,
+      done: statusDist.done,
+      totalFiles,
+      todayFiles: todayDeliveries.reduce((s, l) => s + (l.ok || 0), 0),
+      todayProjects: new Set(todayDeliveries.map(l => l.projectId).filter(Boolean)).size,
+    },
+    statusDistribution: [
+      { label: '剪辑中', value: statusDist.editing, color: '#3b82f6' },
+      { label: '修改中', value: statusDist.modifying, color: '#f59e0b' },
+      { label: '已完成', value: statusDist.done, color: '#22c55e' },
+    ],
+    deliveryTrend: trend,
+    editorRanking: editors,
+    monthlyTrend: monthly,
+    todayDeliveries: todayDeliveries.slice(-20).reverse(),
+    generatedAt: now.toISOString(),
+  });
+});
+
 module.exports = router;

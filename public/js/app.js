@@ -411,9 +411,20 @@ async function refreshPending() {
   } catch(e) {}
   $('pendingCount').innerHTML = countLabel;
   if (!files.length) { list.innerHTML = '<div class="empty">没有待交付文件</div>'; return; }
+  const videoExts = new Set(['.mp4','.avi','.mkv','.mov','.wmv','.flv','.webm','.m4v','.ts']);
+  const baseDir = (resolved.localEpDir || '').replace(/[\\/]+$/, '');
   for (const f of files) {
     const d = document.createElement('div'); d.className = 'pi';
-    d.innerHTML = '<input type="checkbox" checked><span>' + esc(f) + '</span>'; list.appendChild(d);
+    const ext = (f.slice(f.lastIndexOf('.')) || '').toLowerCase();
+    if (videoExts.has(ext)) {
+      const fullPath = baseDir + '\\' + f;
+      d.innerHTML = '<input type="checkbox" checked>' +
+        '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(f) + '</span>' +
+        '<span class="thumb-icon" style="cursor:pointer;color:#3b82f6" data-pid="' + escAttr(projects[sel].id) + '" data-path="' + escAttr(fullPath) + '" onmouseenter="window.thumbHover(this,event)" onmouseleave="window.thumbHide()">🎬</span>';
+    } else {
+      d.innerHTML = '<input type="checkbox" checked><span>' + esc(f) + '</span>';
+    }
+    list.appendChild(d);
   }
 }
 
@@ -1244,6 +1255,10 @@ function toast(msg, type) {
 
 // 覆盖全局 alert 为 toast（非阻断式）
 window.alert = function(m) { toast(m, 'warn'); };
+
+// 暴露给命令面板等外部模块使用
+window.getProjects = function() { return projects; };
+window.selectProjectByIndex = function(idx) { if (idx >= 0 && idx < projects.length) selectProject(idx); };
 
 // ==================== 暗色主题 ====================
 (function() {

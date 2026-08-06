@@ -262,7 +262,8 @@
       body.innerHTML = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px">' +
         data.files.map(f => {
           const sizeStr = f.size > 1073741824 ? (f.size/1073741824).toFixed(1)+'GB' : f.size > 1048576 ? (f.size/1048576).toFixed(1)+'MB' : (f.size/1024).toFixed(0)+'KB';
-          return `<div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;cursor:pointer" onclick="window.Features.openThumbnail('${projectId}','${escAttr(f.path)}',this)">
+          // 悬停懒加载缩略图，点击放大预览
+          return `<div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;cursor:pointer" data-pid="${escAttr(projectId)}" data-path="${escAttr(f.path)}" onmouseenter="window.Features.openThumbnail(this.dataset.pid,this.dataset.path,this)" onclick="window.Features.zoomThumbnail(this)">
             <div style="height:100px;background:var(--bg-secondary);display:flex;align-items:center;justify-content:center;position:relative">
               <span style="font-size:32px">🎬</span>
               <div class="thumb-loading" style="position:absolute;bottom:4px;right:4px;font-size:10px;color:var(--text-muted);background:rgba(0,0,0,.6);padding:1px 5px;border-radius:3px">${sizeStr}</div>
@@ -278,21 +279,43 @@
   async function openThumbnail(projectId, filePath, container) {
     const imgDiv = container.querySelector('div:first-child');
     if (imgDiv.dataset.loaded) return;
-    imgDiv.innerHTML = '<span style="font-size:12px;color:var(--text-muted)">生成缩略图中...</span>';
+    imgDiv.dataset.loading = '1';
+    imgDiv.innerHTML = '<span style="font-size:12px;color:var(--text-muted)">⏳ 生成中...</span>';
     try {
       const url = `/api/preview/${projectId}/thumbnail?path=${encodeURIComponent(filePath)}`;
       const res = await fetch(url);
       if (res.ok) {
         const blob = await res.blob();
         const imgUrl = URL.createObjectURL(blob);
-        imgDiv.innerHTML = `<img src="${imgUrl}" style="width:100%;height:100px;object-fit:cover">`;
+        imgDiv.innerHTML = `<img src="${imgUrl}" style="width:100%;height:100px;object-fit:cover" alt="缩略图">`;
         imgDiv.dataset.loaded = '1';
       } else {
         imgDiv.innerHTML = '<span style="font-size:24px">🎬</span><div style="position:absolute;bottom:4px;left:4px;font-size:9px;color:#f59e0b">无缩略图</div>';
+        imgDiv.dataset.loaded = 'fail';
       }
     } catch(e) {
       imgDiv.innerHTML = '<span style="font-size:24px">🎬</span>';
+      imgDiv.dataset.loaded = 'fail';
+    } finally {
+      delete imgDiv.dataset.loading;
     }
+  }
+
+  // 点击放大预览（已加载的缩略图弹大图）
+  function zoomThumbnail(container) {
+    const img = container.querySelector('div:first-child img');
+    if (!img) return;
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.92);z-index:9999;display:flex;align-items:center;justify-content:center;cursor:zoom-out;padding:20px';
+    const big = document.createElement('img');
+    big.src = img.src;
+    big.style.cssText = 'max-width:90vw;max-height:90vh;object-fit:contain;border-radius:8px;box-shadow:0 8px 32px rgba(0,0,0,.5)';
+    overlay.appendChild(big);
+    // Esc 关闭
+    const onKey = (e) => { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', onKey); } };
+    document.addEventListener('keydown', onKey);
+    overlay.onclick = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+    document.body.appendChild(overlay);
   }
 
   // ==================== 复制回滚 ====================
@@ -402,8 +425,45 @@
     refreshAuditLogs,
     showFilePreview,
     openThumbnail,
+    zoomThumbnail,
     showRollbackHistory,
     doRollback,
     showWebDAVInfo,
+  };
+
+  // ==================== 待交付列表悬停缩略图预览 ====================
+  let _thumbFloat = null;
+  let _thumbReq = 0;
+  window.thumbHover = function(el, event) {
+    const pid = el.dataset.pid;
+    const filePath = el.dataset.path;
+    if (!pid || !filePath) return;
+    if (!_thumbFloat) {
+      _thumbFloat = document.createElement('div');
+      _thumbFloat.style.cssText = 'position:fixed;z-index:9998;background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;padding:6px;box-shadow:0 8px 24px rgba(0,0,0,.3);pointer-events:none;max-width:360px;display:none';
+      document.body.appendChild(_thumbFloat);
+    }
+    const x = event.clientX + 16;
+    const y = event.clientY + 16;
+    _thumbFloat.style.left = Math.min(x, window.innerWidth - 380) + 'px';
+    _thumbFloat.style.top = Math.min(y, window.innerHeight - 220) + 'px';
+    _thumbFloat.style.display = 'block';
+    _thumbFloat.innerHTML = '<div style="font-size:11px;color:var(--text-muted);padding:12px">⏳ 生成缩略图...</div>';
+    const reqId = ++_thumbReq;
+    fetch('/api/preview/' + pid + '/thumbnail?path=' + encodeURIComponent(filePath))
+      .then(r => r.ok ? r.blob() : Promise.reject(new Error('http')))
+      .then(blob => {
+        if (reqId !== _thumbReq || !_thumbFloat) return;
+        const url = URL.createObjectURL(blob);
+        _thumbFloat.innerHTML = '<img src="' + url + '" style="max-width:340px;max-height:200px;border-radius:4px;display:block">';
+      })
+      .catch(() => {
+        if (reqId !== _thumbReq || !_thumbFloat) return;
+        _thumbFloat.innerHTML = '<div style="font-size:11px;color:#f59e0b;padding:12px">🎬 无缩略图<br><span style="color:var(--text-muted);font-size:10px">需安装 ffmpeg</span></div>';
+      });
+  };
+  window.thumbHide = function() {
+    if (_thumbFloat) _thumbFloat.style.display = 'none';
+    _thumbReq++;
   };
 })();
