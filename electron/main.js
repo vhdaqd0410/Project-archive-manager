@@ -297,19 +297,49 @@ function createTray() {
   try {
     const icon = getAppIcon(16);
     tray = new Tray(icon);
-    const autoStart = app.getLoginItemSettings().openAtLogin;
-    const ctx = Menu.buildFromTemplate([
-      { label: '显示主窗口', click: () => { if (mainWindow) { mainWindow.show(); mainWindow.focus(); } } },
-      { label: '隐藏窗口', click: () => { if (mainWindow) mainWindow.hide(); } },
-      { type: 'separator' },
-      { label: '开机自启', type: 'checkbox', checked: autoStart, click: (mi) => { app.setLoginItemSettings({ openAtLogin: mi.checked }); } },
-      { type: 'separator' },
-      { label: '退出', click: () => { app.isQuitting = true; app.quit(); } }
-    ]);
     tray.setToolTip('项目档案管理器 — 运行中');
-    tray.setContextMenu(ctx);
+    tray.setContextMenu(buildTrayMenu());
     tray.on('double-click', () => { if (mainWindow) { mainWindow.show(); mainWindow.focus(); } });
   } catch (e) { console.error('[Tray] 创建托盘失败:', e.message); }
+}
+
+// 构建托盘快捷菜单（含项目操作、视图切换、任务管理）
+function buildTrayMenu() {
+  const autoStart = app.getLoginItemSettings().openAtLogin;
+  return Menu.buildFromTemplate([
+    { label: '📦 新建项目', click: () => { showWindow(); sendToRenderer('menu:new-project'); } },
+    { label: '⌘ 命令面板 (Ctrl+K)', click: () => { showWindow(); sendToRenderer('menu:command-palette'); } },
+    { type: 'separator' },
+    { label: '🗂️ 看板视图', click: () => { showWindow(); sendToRenderer('menu:kanban'); } },
+    { label: '📅 交付日历', click: () => { showWindow(); sendToRenderer('menu:calendar'); } },
+    { label: '📺 数据大屏', click: () => { showWindow(); sendToRenderer('menu:screen'); } },
+    { label: '📊 统计仪表盘', click: () => { showWindow(); sendToRenderer('menu:dashboard'); } },
+    { label: '📈 月度报告', click: () => { showWindow(); sendToRenderer('menu:monthly'); } },
+    { label: '📥 导出报告中心', click: () => { showWindow(); sendToRenderer('menu:report-center'); } },
+    { type: 'separator' },
+    { label: '⏸️ 暂停所有任务', click: () => sendToRenderer('menu:pause-all-jobs') },
+    { label: '▶️ 恢复所有任务', click: () => sendToRenderer('menu:resume-all-jobs') },
+    { label: '✕ 取消所有任务', click: () => sendToRenderer('menu:cancel-all-jobs') },
+    { type: 'separator' },
+    { label: '🔄 刷新项目列表', click: () => { showWindow(); sendToRenderer('menu:refresh'); } },
+    { label: '💾 立即备份数据库', click: () => sendToRenderer('menu:backup-now') },
+    { type: 'separator' },
+    { label: '显示主窗口', click: () => showWindow() },
+    { label: '隐藏窗口', click: () => { if (mainWindow) mainWindow.hide(); } },
+    { type: 'separator' },
+    { label: '开机自启', type: 'checkbox', checked: autoStart, click: (mi) => { app.setLoginItemSettings({ openAtLogin: mi.checked }); } },
+    { type: 'separator' },
+    { label: '退出', click: () => { app.isQuitting = true; app.quit(); } }
+  ]);
+}
+
+// 显示并聚焦主窗口
+function showWindow() {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    if (!mainWindow.isVisible()) mainWindow.show();
+    mainWindow.focus();
+  }
 }
 
 // 更新托盘 tooltip 显示未读通知数
@@ -462,17 +492,7 @@ ipcMain.handle('get-settings', async () => {
 ipcMain.handle('set-auto-start', async (_e, enabled) => {
   app.setLoginItemSettings({ openAtLogin: !!enabled });
   // 同步更新托盘菜单
-  if (tray) {
-    const ctx = Menu.buildFromTemplate([
-      { label: '显示主窗口', click: () => { if (mainWindow) { mainWindow.show(); mainWindow.focus(); } } },
-      { label: '隐藏窗口', click: () => { if (mainWindow) mainWindow.hide(); } },
-      { type: 'separator' },
-      { label: '开机自启', type: 'checkbox', checked: !!enabled, click: (mi) => { app.setLoginItemSettings({ openAtLogin: mi.checked }); } },
-      { type: 'separator' },
-      { label: '退出', click: () => { app.isQuitting = true; app.quit(); } }
-    ]);
-    tray.setContextMenu(ctx);
-  }
+  if (tray) tray.setContextMenu(buildTrayMenu());
   return { success: true, autoStart: !!enabled };
 });
 

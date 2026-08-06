@@ -526,6 +526,25 @@ function getAuditLogs(filter) {
   return db.prepare(sql).all(...params);
 }
 
+// ── Helper: file checksums（用于质检报告）──
+function getFileChecksums(filter) {
+  if (!available) return [];
+  let sql = 'SELECT * FROM file_checksums';
+  const params = [];
+  if (filter && filter.projectId) {
+    sql += ' WHERE projectId = ?';
+    params.push(filter.projectId);
+  }
+  sql += ' ORDER BY verifiedAt DESC';
+  if (filter && filter.limit) {
+    sql += ' LIMIT ?';
+    params.push(filter.limit);
+  } else {
+    sql += ' LIMIT 1000';
+  }
+  return db.prepare(sql).all(...params);
+}
+
 module.exports = {
   init,
   getDB: () => db,
@@ -550,4 +569,5 @@ module.exports = {
   getProjectTodos, addProjectTodo, updateProjectTodo, deleteProjectTodo,
   getAuditLogs,
   getThumbnail, addThumbnail,
+  getFileChecksums,
 };

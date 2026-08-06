@@ -370,4 +370,202 @@ router.get('/screen', (req, res) => {
   });
 });
 
+// ==================== 报告导出中心 ====================
+// 支持 4 种报告：projects(项目档案) / delivery(交付历史) / editors(剪辑师绩效) / quality(质检报告)
+// 格式：xlsx / csv / json
+
+router.get('/report/:type', async (req, res) => {
+  const type = req.params.type;
+  const format = (req.query.format || 'xlsx').toLowerCase();
+  const validTypes = ['projects', 'delivery', 'editors', 'quality'];
+  if (!validTypes.includes(type)) {
+    return res.status(400).json({ error: '未知报告类型: ' + type + '，支持: ' + validTypes.join(', ') });
+  }
+  const validFormats = ['xlsx', 'csv', 'json'];
+  if (!validFormats.includes(format)) {
+    return res.status(400).json({ error: '未知格式: ' + format + '，支持: ' + validFormats.join(', ') });
+  }
+
+  try {
+    const data = buildReportData(type);
+    const baseName = type + '-report-' + new Date().toISOString().slice(0, 10);
+
+    if (format === 'json') {
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${baseName}.json"`);
+      return res.json({ type, generatedAt: new Date().toISOString(), rows: data.rows, summary: data.summary });
+    }
+
+    if (format === 'csv') {
+      const csv = toCSV(data.rows);
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${baseName}.csv"`);
+      // BOM 让 Excel 正确识别 UTF-8
+      return res.send('\ufeff' + csv);
+    }
+
+    // xlsx
+    const ExcelJS = require('exceljs');
+    const wb = new ExcelJS.Workbook();
+    wb.creator = '项目档案管理器';
+    wb.created = new Date();
+    const ws = wb.addWorksheet(data.sheetName || '报告');
+    if (data.rows.length) {
+      const keys = Object.keys(data.rows[0]);
+      ws.columns = keys.map(k => ({ header: k, key: k, width: 18 }));
+      ws.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF3B82F6' } };
+      for (const row of data.rows) ws.addRow(row);
+    }
+    // 摘要 sheet
+    if (data.summary) {
+      const ws2 = wb.addWorksheet('摘要');
+      ws2.columns = [{ header: '指标', key: 'k', width: 24 }, { header: '值', key: 'v', width: 24 }];
+      ws2.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      ws2.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E40AF' } };
+      for (const [k, v] of Object.entries(data.summary)) ws2.addRow({ k, v: String(v) });
+    }
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${baseName}.xlsx"`);
+    await wb.xlsx.write(res);
+    return res.end();
+  } catch (e) {
+    console.error('[stats] 报告导出失败:', e);
+    res.status(500).json({ error: '导出失败: ' + e.message });
+  }
+});
+
+// 构建各类报告数据
+function buildReportData(type) {
+  const projects = shared.projects || [];
+  const logs = projectService.loadDeliveryLog(10000) || [];
+  const now = new Date().toISOString();
+
+  if (type === 'projects') {
+    const rows = projects.map(p => ({
+      项目名: p.name,
+      状态: p.status === 'editing' ? '剪辑中' : p.status === 'modifying' ? '修改中' : '已完成',
+      本地目录: p.localDir || '',
+      NAS目录: p.nasDir || '',
+      目标集数: p.episodeTarget || 0,
+      剪辑人员: (p.episodeAssignments || []).map(a => a.name + (a.start ? `(${a.start}-${a.end})` : '')).join('、'),
+      备注: (p.memo || '').slice(0, 100),
+      创建时间: p.createdAt || '',
+    }));
+    return {
+      sheetName: '项目档案',
+      rows,
+      summary: {
+        总项目数: rows.length,
+        剪辑中: rows.filter(r => r.状态 === '剪辑中').length,
+        修改中: rows.filter(r => r.状态 === '修改中').length,
+        已完成: rows.filter(r => r.状态 === '已完成').length,
+        导出时间: now,
+      },
+    };
+  }
+
+  if (type === 'delivery') {
+    const rows = logs.slice().reverse().map(l => ({
+      时间: l.time || '',
+      项目名: l.projectName || '',
+      操作: l.action || '',
+      详情: (l.detail || '').slice(0, 100),
+      成功数: l.ok || 0,
+      失败数: l.fail || 0,
+    }));
+    const totalOk = logs.reduce((s, l) => s + (l.ok || 0), 0);
+    const totalFail = logs.reduce((s, l) => s + (l.fail || 0), 0);
+    return {
+      sheetName: '交付历史',
+      rows,
+      summary: {
+        总记录数: logs.length,
+        总成功文件: totalOk,
+        总失败文件: totalFail,
+        首次交付: logs[0] ? logs[0].time : '无',
+        最近交付: logs.length ? logs[logs.length - 1].time : '无',
+        导出时间: now,
+      },
+    };
+  }
+
+  if (type === 'editors') {
+    const editorMap = {};
+    for (const p of projects) {
+      for (const a of (p.episodeAssignments || [])) {
+        const name = (a.name || '').trim();
+        if (!name) continue;
+        if (!editorMap[name]) editorMap[name] = { name, projects: new Set(), episodes: 0 };
+        editorMap[name].projects.add(p.name);
+        const range = (a.end || 0) - (a.start || 0) + 1;
+        if (range > 0) editorMap[name].episodes += range;
+      }
+    }
+    const rows = Object.values(editorMap).map(e => ({
+      剪辑师: e.name,
+      负责项目数: e.projects.size,
+      负责集数: e.episodes,
+      项目列表: Array.from(e.projects).join('、'),
+    })).sort((a, b) => b.负责集数 - a.负责集数);
+    return {
+      sheetName: '剪辑师绩效',
+      rows,
+      summary: {
+        总剪辑师数: rows.length,
+        总负责集数: rows.reduce((s, r) => s + r.负责集数, 0),
+        导出时间: now,
+      },
+    };
+  }
+
+  if (type === 'quality') {
+    // 基于 file_checksums 表
+    let rows = [];
+    try {
+      const db = require('../services/db');
+      rows = (db.getFileChecksums ? db.getFileChecksums() : []).map(c => ({
+        项目ID: c.projectId || '',
+        文件路径: c.filePath || '',
+        文件名: c.fileName || '',
+        校验状态: c.verified ? '通过' : '失败',
+        文件大小: c.fileSize || 0,
+        校验时间: c.verifiedAt || '',
+      }));
+    } catch (e) {}
+    const verified = rows.filter(r => r.校验状态 === '通过').length;
+    const failed = rows.filter(r => r.校验状态 === '失败').length;
+    return {
+      sheetName: '质检报告',
+      rows,
+      summary: {
+        总校验文件: rows.length,
+        通过: verified,
+        失败: failed,
+        通过率: rows.length ? (verified / rows.length * 100).toFixed(1) + '%' : 'N/A',
+        导出时间: now,
+      },
+    };
+  }
+}
+
+// CSV 转换
+function toCSV(rows) {
+  if (!rows.length) return '';
+  const keys = Object.keys(rows[0]);
+  const escape = (v) => {
+    const s = v == null ? '' : String(v);
+    if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+      return '"' + s.replace(/"/g, '""') + '"';
+    }
+    return s;
+  };
+  const lines = [keys.join(',')];
+  for (const r of rows) {
+    lines.push(keys.map(k => escape(r[k])).join(','));
+  }
+  return lines.join('\r\n');
+}
+
 module.exports = router;

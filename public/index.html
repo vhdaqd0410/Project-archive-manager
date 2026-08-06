@@ -27,6 +27,7 @@
     <button id="calendarBtn" onclick="window.CalendarView && window.CalendarView.show()" title="交付日历" style="width:32px;height:32px;border:none;border-radius:6px;background:#f1f5f9;cursor:pointer;font-size:16px;transition:all .15s;display:flex;align-items:center;justify-content:center">📅</button>
     <button id="screenBtn" onclick="window.ScreenView && window.ScreenView.show()" title="数据大屏" style="width:32px;height:32px;border:none;border-radius:6px;background:#f1f5f9;cursor:pointer;font-size:16px;transition:all .15s;display:flex;align-items:center;justify-content:center">📺</button>
     <button id="cmdBtn" onclick="window.CommandPalette && window.CommandPalette.toggle()" title="命令面板 (Ctrl+K)" style="width:32px;height:32px;border:none;border-radius:6px;background:#f1f5f9;cursor:pointer;font-size:14px;transition:all .15s;display:flex;align-items:center;justify-content:center">⌘</button>
+    <button id="reportBtn" onclick="window.ReportCenter && window.ReportCenter.show()" title="报告导出中心" style="width:32px;height:32px;border:none;border-radius:6px;background:#f1f5f9;cursor:pointer;font-size:16px;transition:all .15s;display:flex;align-items:center;justify-content:center">📥</button>
     <button id="settingsBtn" onclick="showSettings()" title="设置" style="width:32px;height:32px;border:none;border-radius:6px;background:#f1f5f9;cursor:pointer;font-size:16px;transition:all .15s;display:flex;align-items:center;justify-content:center">⚙️</button>
   </div>
 </div>
@@ -131,6 +132,7 @@
 <script src="/js/calendar-view.js?v=2.7.1"></script>
 <script src="/js/command-palette.js?v=2.7.1"></script>
 <script src="/js/screen-view.js?v=2.7.1"></script>
+<script src="/js/report-center.js?v=2.7.1"></script>
 <script>
 document.getElementById('splitter').onmousedown = function(e) {
   e.preventDefault();

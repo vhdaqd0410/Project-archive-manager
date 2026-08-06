@@ -1600,6 +1600,43 @@ if (window.electronAPI && window.electronAPI.isElectron) {
   window.electronAPI.onMessage('menu:import-backup', () => document.getElementById('importFileInput').click());
   window.electronAPI.onMessage('drop:import-folder', (fp) => handleDropImport(fp));
   window.electronAPI.onMessage('fs:changed', (projectId) => onFsChanged(projectId));
+  // 托盘快捷菜单
+  window.electronAPI.onMessage('menu:command-palette', () => window.CommandPalette && window.CommandPalette.toggle());
+  window.electronAPI.onMessage('menu:kanban', () => window.showKanban && window.showKanban());
+  window.electronAPI.onMessage('menu:calendar', () => window.CalendarView && window.CalendarView.show());
+  window.electronAPI.onMessage('menu:screen', () => window.ScreenView && window.ScreenView.show());
+  window.electronAPI.onMessage('menu:dashboard', () => window.toggleDashboard && window.toggleDashboard());
+  window.electronAPI.onMessage('menu:monthly', () => window.MonthlyReport && window.MonthlyReport.show());
+  window.electronAPI.onMessage('menu:report-center', () => window.ReportCenter && window.ReportCenter.show());
+  window.electronAPI.onMessage('menu:pause-all-jobs', () => batchJobControl('pause'));
+  window.electronAPI.onMessage('menu:resume-all-jobs', () => batchJobControl('resume'));
+  window.electronAPI.onMessage('menu:cancel-all-jobs', () => batchJobControl('cancel'));
+  window.electronAPI.onMessage('menu:refresh', () => refreshProjects());
+  window.electronAPI.onMessage('menu:backup-now', () => backupNow());
+}
+
+// 批量任务控制（暂停/恢复/取消所有运行中任务）
+function batchJobControl(action) {
+  const jobs = (typeof window.getJobs === 'function' ? window.getJobs() : []);
+  let count = 0;
+  for (const j of jobs) {
+    if (j.status === 'running' || j.status === 'paused') {
+      if (action === 'pause' && j.status === 'running') { j.paused = true; j.status = 'paused'; count++; }
+      else if (action === 'resume' && j.status === 'paused') { j.paused = false; j.status = 'running'; count++; }
+      else if (action === 'cancel') { j.cancel = true; count++; }
+    }
+  }
+  const label = action === 'pause' ? '暂停' : action === 'resume' ? '恢复' : '取消';
+  toast(label + ' ' + count + ' 个任务');
+}
+
+// 立即备份数据库
+async function backupNow() {
+  try {
+    const r = await (await fetch('/api/backup/create', { method: 'POST' })).json();
+    if (r.success) toast('💾 数据库已备份: ' + (r.file || ''), 'success');
+    else toast('备份失败: ' + (r.error || ''), 'error');
+  } catch(e) { toast('备份请求失败: ' + e.message, 'error'); }
 }
 
 // ==================== 设置弹窗 ====================
